@@ -1,11 +1,12 @@
 // STUPInD Service Worker — enables offline use + reliable background operation
 // Registered from index.html. Must be served from the same origin as the app.
 
-const CACHE_NAME = 'stupind-v1';
+const CACHE_NAME = 'stupind-v2';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './favicon.ico',
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',

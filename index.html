@@ -17,6 +17,7 @@
 <!-- External PWA assets (preferred) — fallback to inline blobs if missing (e.g. file:// use) -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png" id="pwa-apple-icon">
+<link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" id="pwa-favicon">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
@@ -280,6 +281,12 @@
   .task-input::placeholder{color:#2a3a4a}
   .task-add{padding:9px 16px;background:linear-gradient(135deg,#1a5a2a,#228b3b);border-radius:8px;color:#c8f0d0;font-size:11px;font-weight:700;letter-spacing:1px;white-space:nowrap}
   .task-list{display:flex;flex-direction:column;gap:6px}
+  /* Give the task list bottom breathing room when the floating mini-timer is visible
+     so it doesn't cover the last task row */
+  body:has(.mini-timer:not([style*="display:none"])) .task-list{padding-bottom:72px}
+  /* Task tags: cap width to prevent horizontal overflow when task has many tags */
+  .task-tags-inline{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;overflow:hidden}
+  .task-tags-inline .tag-chip{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .task-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:#0a1320;border:1px solid #152238;transition:.3s}
   .task-item.active-task{border-color:#2471a3;background:#0d1a2d;animation:glow 2s infinite}
   .task-play{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;transition:.2s}
@@ -2377,13 +2384,15 @@ function addGoal(){const inp=gid('goalInput'),text=inp.value.trim();if(!text)ret
 function toggleGoal(id){const g=goals.find(x=>x.id===id);if(g){g.done=!g.done;g.doneAt=g.done?timeNow():null}renderGoalList();saveState()}
 function removeGoal(id){goals=goals.filter(g=>g.id!==id);renderGoalList();saveState()}
 function renderGoalList(){
-  const list=gid('goalList');if(!list)return; // panel removed
-  gid('goalCount').textContent=goals.filter(g=>g.done).length+' / '+goals.length;
+  const list=gid('goalList');if(!list)return; // panel removed — skip everything
+  const cnt=gid('goalCount');if(cnt)cnt.textContent=goals.filter(g=>g.done).length+' / '+goals.length;
   list.querySelectorAll('.goal-item').forEach(e=>e.remove());
-  if(!goals.length){gid('goalEmpty').style.display='';gid('goalProgress').style.display='none';return}
-  gid('goalEmpty').style.display='none';gid('goalProgress').style.display='flex';
+  const empty=gid('goalEmpty'),prog=gid('goalProgress');
+  if(!goals.length){if(empty)empty.style.display='';if(prog)prog.style.display='none';return}
+  if(empty)empty.style.display='none';if(prog)prog.style.display='flex';
   const pct=goals.length?Math.round((goals.filter(g=>g.done).length/goals.length)*100):0;
-  gid('goalBar').style.width=pct+'%';gid('goalPct').textContent=pct+'%';
+  const bar=gid('goalBar'),pctEl=gid('goalPct');
+  if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=pct+'%';
   [...goals.filter(g=>!g.done),...goals.filter(g=>g.done)].forEach(g=>{
     const d=document.createElement('div');d.className='goal-item'+(g.done?' checked':'');
     d.innerHTML=`<button class="goal-check${g.done?' on':''}" onclick="toggleGoal(${g.id})">${g.done?'✓':''}</button><span class="goal-text">${esc(g.text)}</span>${g.doneAt?`<span class="goal-time">${g.doneAt}</span>`:''}<button class="goal-rm" onclick="removeGoal(${g.id})">×</button>`;
@@ -2993,7 +3002,19 @@ function renderTaskList(){
   if(taskView==='board'){renderBoard(visibleTasks);return}
   if(taskView==='calendar'){renderCalendar(visibleTasks);return}
   list.querySelectorAll('.task-item, .task-subtask-form, .task-section').forEach(e=>e.remove());
-  if(!visibleTasks.length){gid('taskEmpty').style.display='';gid('taskEmpty').textContent=tasks.length?'No tasks match your filters':'No tasks yet — add one above to get started';return}
+  if(!visibleTasks.length){
+    const empty=gid('taskEmpty');
+    empty.style.display='';
+    if(tasks.length){
+      // Has tasks, but filter/view excludes all
+      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">🔍</div><div style="font-weight:500;margin-bottom:4px">No tasks match your filters</div><div style="font-size:12px;opacity:.7">Try adjusting the Filters panel, or switch to the "All" smart view.</div>';
+    } else if(smartView==='archived'){
+      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">📦</div><div style="font-weight:500;margin-bottom:4px">Archive is empty</div><div style="font-size:12px;opacity:.7">Archived tasks will appear here when you archive them from the menu.</div>';
+    } else {
+      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">✨</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><div style="font-size:12px;opacity:.7;margin-bottom:8px">Type above to add one, or try a quick-add shortcut:</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping</span></div>';
+    }
+    return;
+  }
   gid('taskEmpty').style.display='none';
   const visibleIds=new Set(visibleTasks.map(t=>t.id));
   // If grouping, bypass tree-render and group flat (only roots)
@@ -3413,10 +3434,14 @@ function renderSubtaskForm(parentId,depth){
 // Kanban Board View
 function renderBoard(visibleTasks){
   const board=gid('boardView');board.innerHTML='';
+  const isMobile=window.matchMedia('(max-width:640px)').matches;
   STATUS_ORDER.forEach(st=>{
+    const status=STATUSES[st];
+    const colTasks=sortTasks(visibleTasks.filter(t=>(t.status||'open')===st));
+    // On mobile, hide empty columns unless it's "open" (default drop target) or "done" (completed)
+    if(isMobile&&colTasks.length===0&&st!=='open'&&st!=='done')return;
     const col=document.createElement('div');col.className='board-col';
     col.dataset.status=st;
-    // Column drop zone
     col.ondragover=function(e){e.preventDefault();e.dataTransfer.dropEffect='move';col.classList.add('drop-target')};
     col.ondragleave=function(){col.classList.remove('drop-target')};
     col.ondrop=function(e){
@@ -3428,8 +3453,6 @@ function renderBoard(visibleTasks){
       else src.completedAt=null;
       renderTaskList();saveState();
     };
-    const status=STATUSES[st];
-    const colTasks=sortTasks(visibleTasks.filter(t=>(t.status||'open')===st));
     col.innerHTML='<div class="board-col-hdr"><span class="status-badge '+status.cls+'">'+status.label+'</span><span class="cc-count">'+colTasks.length+'</span></div><div class="board-col-body"></div>';
     const body=col.querySelector('.board-col-body');
     colTasks.forEach(t=>{
