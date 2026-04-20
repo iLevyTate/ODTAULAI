@@ -129,7 +129,7 @@ function _mergeState(remote) {
   goalIdCtr = Math.max(goalIdCtr, remote.goalIdCtr || 0);
 
   _lastSyncAt = Date.now();
-  saveState();
+  saveState('auto');
   if (typeof renderAll === 'function') renderAll();
 }
 

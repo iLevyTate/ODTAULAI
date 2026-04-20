@@ -353,17 +353,31 @@ function aiUndo(){
     else if(s.type === 'updated'){ const t = findTask(s.id); if(t) Object.assign(t, s.before); }
     else if(s.type === 'deleted') tasks.push(s.before);
   });
-  saveState();
+  saveState('user');
   if(typeof renderTaskList === 'function') renderTaskList();
   _renderUndoBtn();
   _setIntelStatus('ready', `↩ Reverted ${flat.length} change${flat.length !== 1 ? 's' : ''}`);
 }
 
+function _intelIc(paths){
+  return '<svg class="intel-action-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+}
+const _IC = {
+  bolt: _intelIc('<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>'),
+  harmonize: _intelIc('<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><path d="M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/>'),
+  folder: _intelIc('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
+  duplicate: _intelIc('<rect x="8" y="8" width="13" height="13" rx="2" ry="2"/><path d="M4 16H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1"/>'),
+  refresh: _intelIc('<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/>'),
+  undo: _intelIc('<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>'),
+  search: _intelIc('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>'),
+  spark: _intelIc('<path d="M12 3c.5 2.5 2 4 4.5 4.5-2.5.5-4 2-4.5 4.5-.5-2.5-2-4-4.5-4.5 2.5-.5 4-2 4.5-4.5z"/>'),
+};
+
 function _renderUndoBtn(){
   const btn = document.getElementById('intelUndoBtn');
   if(!btn) return;
   btn.style.display = _undoStack.length ? '' : 'none';
-  btn.textContent = `↩ Undo (${_undoStack.length})`;
+  btn.innerHTML = _IC.undo + '<span>Undo (' + _undoStack.length + ')</span>';
 }
 
 function _renderPendingOps(){
@@ -432,7 +446,7 @@ function intelApplyPending(){
 
   if(snaps.length){
     _pushUndo(`${applied} change${applied !== 1 ? 's' : ''}`, snaps);
-    saveState();
+    saveState('user');
     if(typeof renderTaskList === 'function') renderTaskList();
     if(typeof renderBanner === 'function') renderBanner();
     if(typeof renderLists === 'function') renderLists();
@@ -459,7 +473,7 @@ function intelApplyPending(){
 }
 
 function _setIntelStateClass(el, state){
-  el.className = 'intel-status intel-status--' + (
+  el.className = 'intel-status intel-status-chip intel-status--' + (
     state === 'ready' ? 'ok' : state === 'error' ? 'error' :
       state === 'working' ? 'syncing' : state === 'loading' ? 'syncing' : 'idle');
 }
@@ -582,45 +596,86 @@ function renderAIPanel(){
 
   const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/gte-small';
   panel.innerHTML = `
-    <div class="intel-desc intel-desc-short">
-      <strong>Understand your tasks</strong> — runs on this device; <span class="intel-nogen">no cloud LLM, no chat</span>.
-      <ul class="intel-start-list">
-        <li><strong>Search by meaning</strong> — turn on <em>Semantic</em> next to the task search (Tasks tab).</li>
-        <li><strong>Smart-add</strong> — tap <strong>✨</strong> beside a new task for suggested fields.</li>
-        <li><strong>Bulk cleanup</strong> — <em>Harmonize</em>, <em>Align values</em>, <em>Auto-organize</em>, and <em>Find duplicates</em> preview changes before you apply.</li>
-      </ul>
-      <details class="intel-details"><summary>How it works</summary>
-        <p class="intel-details-body">A small on-device embedding model (<strong>${embedModel}</strong>, ~33 MB) encodes each task’s meaning as a vector. Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
-      </details>
-    </div>
-    <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
-      <div class="intel-progress-track"><div class="intel-progress-bar" id="intelProgressBar" style="width:0%"></div></div>
-      <div class="intel-progress-info"><span id="intelProgressPct">0%</span> <span id="intelProgressTxt"></span></div>
-    </div>
-    <div id="intelStatus" class="intel-status intel-status--${ready ? 'ok' : 'idle'}">
-      ${ready ? `✓ Ready via ${dev || 'CPU'}` : 'Loading model in background…'}
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
-      <button class="btn-primary btn-sm" type="button" onclick="intelRetryLoad()" id="intelRetryBtn" style="display:none">↻ Retry load</button>
-      <button class="btn-ghost btn-sm" type="button" id="intelUndoBtn" onclick="aiUndo()" style="display:${_undoStack.length ? '' : 'none'}">↩ Undo (${_undoStack.length})</button>
-    </div>
-    <div class="intel-actions" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
-      <button class="btn-primary" type="button" onclick="aiAlign()" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>⚡ Align values only</button>
-      <button class="btn-primary" type="button" onclick="intelHarmonizeFields()" ${!ready ? 'disabled' : ''} title="Propose updates using values + category, priority, effort, context, energy, tags from embeddings and similar tasks. Pick 2–3 dominant values first to steer value alignment. Review before apply.">✴ Harmonize all fields</button>
-      <button class="btn-ghost" type="button" onclick="intelAutoOrganize()" ${!ready || (typeof lists === 'undefined' || lists.length < 2) ? 'disabled' : ''} title="Route tasks into the list whose name+description matches best. Edit a list's description (✎) to tune routing.">🗂 Auto-organize into lists</button>
-      <button class="btn-ghost" type="button" onclick="intelFindDuplicatesUI()">📋 Find duplicates</button>
-      <button class="btn-ghost" type="button" onclick="intelReembedAll()">↻ Re-embed all tasks</button>
-    </div>
-    <div id="intelDupSection" class="intel-dup-section" style="display:none"></div>
-    <div id="intelPendingOps" class="pending-ops-wrap" style="display:none"></div>
-    <div class="mfield-lbl" style="margin-bottom:6px">Dominant values <span style="color:var(--text-3);font-weight:400;font-size:11px">— pick 2–3 for alignment focus</span></div>
-    <div class="schwartz-grid" id="intelValuesGrid"></div>
-    <div class="intel-breakdown-section" style="margin-top:12px">
-      <div class="mfield-lbl" style="margin-bottom:6px">Category breakdown</div>
-      <div id="intelBreakdown"></div>
-    </div>
-    <div class="intel-hint" style="margin-top:10px;font-size:11px;color:var(--text-3)">
-      Batches are undoable (last 10). Alignment proposes <code>UPDATE_TASK</code> previews — apply when ready.
+    <div class="intel-card">
+      <div class="intel-card-head">
+        <div class="intel-card-titles">
+          <h3 class="intel-card-h3">Task understanding</h3>
+          <span class="intel-card-badge">On device</span>
+        </div>
+        <div id="intelStatus" class="intel-status intel-status-chip intel-status--${ready ? 'ok' : 'idle'}" role="status">
+          ${ready ? 'Ready · ' + (dev || 'CPU') : 'Loading model…'}
+        </div>
+      </div>
+      <div class="intel-card-body">
+        <div class="intel-desc intel-desc-short">
+          <p class="intel-lead"><strong>Understand your tasks</strong> — runs on this device. <span class="intel-nogen">No cloud LLM, no chat.</span></p>
+          <div class="intel-feature-grid">
+            <div class="intel-feature">
+              <span class="intel-feature-ic" aria-hidden="true">${_IC.search}</span>
+              <div class="intel-feature-txt"><strong>Semantic search</strong><span class="intel-feature-sub">Tasks tab — toggle next to search</span></div>
+            </div>
+            <div class="intel-feature">
+              <span class="intel-feature-ic" aria-hidden="true">${_IC.spark}</span>
+              <div class="intel-feature-txt"><strong>Smart-add</strong><span class="intel-feature-sub">Button beside the new-task field</span></div>
+            </div>
+            <div class="intel-feature">
+              <span class="intel-feature-ic" aria-hidden="true">${_IC.harmonize}</span>
+              <div class="intel-feature-txt"><strong>Bulk cleanup</strong><span class="intel-feature-sub">Preview changes before you apply</span></div>
+            </div>
+          </div>
+          <details class="intel-details"><summary>How it works</summary>
+            <p class="intel-details-body">A small on-device embedding model (<strong>${embedModel}</strong>, ~33 MB) encodes each task’s meaning as a vector. Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
+          </details>
+        </div>
+        <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
+          <div class="intel-progress-track"><div class="intel-progress-bar" id="intelProgressBar" style="width:0%"></div></div>
+          <div class="intel-progress-info"><span id="intelProgressPct">0%</span> <span id="intelProgressTxt"></span></div>
+        </div>
+        <div class="intel-toolbar-row">
+          <button class="intel-tool-btn intel-tool-btn--primary" type="button" onclick="intelRetryLoad()" id="intelRetryBtn" style="display:none">${_IC.refresh}<span>Retry load</span></button>
+          <button class="intel-tool-btn" type="button" id="intelUndoBtn" onclick="aiUndo()" style="display:${_undoStack.length ? '' : 'none'}">${_IC.undo}<span>Undo</span></button>
+        </div>
+        <div class="intel-action-grid">
+          <button type="button" class="intel-action-btn intel-action-btn--primary" onclick="aiAlign()" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
+            ${_IC.bolt}
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">Requires 2–3 dominant values selected below</span></span>
+          </button>
+          <button type="button" class="intel-action-btn intel-action-btn--primary" onclick="intelHarmonizeFields()" ${!ready ? 'disabled' : ''}
+            title="Propose updates using values, category, priority, effort, context, energy, and tags from embeddings and similar tasks. Review before apply.">
+            ${_IC.harmonize}
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Harmonize all fields</span><span class="intel-action-btn-sub">Preview field updates from the embedding model</span></span>
+          </button>
+          <button type="button" class="intel-action-btn" onclick="intelAutoOrganize()" ${!ready || (typeof lists === 'undefined' || lists.length < 2) ? 'disabled' : ''}
+            title="Route tasks into the list whose name and description match best. Edit a list description to tune routing.">
+            ${_IC.folder}
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Auto-organize into lists</span><span class="intel-action-btn-sub">Needs at least two lists</span></span>
+          </button>
+          <button type="button" class="intel-action-btn" onclick="intelFindDuplicatesUI()">
+            ${_IC.duplicate}
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Find duplicates</span><span class="intel-action-btn-sub">Near-duplicate pairs by embedding similarity</span></span>
+          </button>
+          <button type="button" class="intel-action-btn" onclick="intelReembedAll()">
+            ${_IC.refresh}
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Re-embed all tasks</span><span class="intel-action-btn-sub">Refresh vectors after bulk edits</span></span>
+          </button>
+        </div>
+        <div id="intelDupSection" class="intel-dup-section" style="display:none"></div>
+        <div id="intelPendingOps" class="pending-ops-wrap" style="display:none"></div>
+        <div class="intel-section-hdr">
+          <span class="intel-section-title">Dominant values</span>
+          <span class="intel-section-hint">Pick 2–3 to steer alignment</span>
+        </div>
+        <div class="schwartz-grid" id="intelValuesGrid"></div>
+        <div class="intel-breakdown-section">
+          <div class="intel-section-hdr">
+            <span class="intel-section-title">Category breakdown</span>
+          </div>
+          <div id="intelBreakdown"></div>
+        </div>
+        <p class="intel-hint intel-hint-foot">
+          Batches are undoable (last 10). Alignment proposes <code>UPDATE_TASK</code> previews — apply when ready.
+        </p>
+      </div>
     </div>`;
 
   _renderValuesGrid();
@@ -932,7 +987,7 @@ async function applySmartAddAndSubmit(){
   renderTaskList();
   if(typeof renderBanner === 'function') renderBanner();
   if(typeof renderLists === 'function') renderLists();
-  saveState();
+  saveState('user');
 }
 
 function openWhatNext(){

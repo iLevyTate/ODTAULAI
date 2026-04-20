@@ -1,6 +1,6 @@
 // ========== CONFIG ==========
-function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(!running&&!finished){setPhaseTime();renderPips()}saveState()}
-function toggleOpt(id){const el=gid(id);el.classList.toggle('on');if(id==='togBreak')cfg.autoBreak=el.classList.contains('on');if(id==='togWork')cfg.autoWork=el.classList.contains('on');if(id==='togSound'){cfg.sound=el.classList.contains('on');if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=el.classList.contains('on');if(id==='togNotif'){cfg.notif=el.classList.contains('on');if(cfg.notif)reqNotifPerm()}saveState()}
+function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(!running&&!finished){setPhaseTime();renderPips()}saveState('user')}
+function toggleOpt(id){const el=gid(id);el.classList.toggle('on');if(id==='togBreak')cfg.autoBreak=el.classList.contains('on');if(id==='togWork')cfg.autoWork=el.classList.contains('on');if(id==='togSound'){cfg.sound=el.classList.contains('on');if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=el.classList.contains('on');if(id==='togNotif'){cfg.notif=el.classList.contains('on');if(cfg.notif)reqNotifPerm()}saveState('user')}
 let settingsOpen=false;
 function toggleSettings(){
   const body=gid('settingsBody'),arrow=gid('settingsArrow');
@@ -62,7 +62,7 @@ function renderAll(){
   renderPips();renderCtrls();renderStats();renderTaskList();renderGoalList();renderArchive();updateTitle();updateMiniTimer()
 }
 function renderPips(){const c=gid('pips');c.innerHTML='';for(let i=0;i<cfg.cycle;i++){const d=document.createElement('div');d.className='pip'+(i<pomosInCycle?' done':i===pomosInCycle&&phase==='work'?' current':'');d.title='Jump to pomo '+(i+1);d.onclick=(function(idx){return function(){jumpToPomo(idx)}})(i);c.appendChild(d)}}
-function jumpToPomo(idx){if(running)return;if(idx<0||idx>=cfg.cycle)return;pomosInCycle=idx;renderPips();saveState()}
+function jumpToPomo(idx){if(running)return;if(idx<0||idx>=cfg.cycle)return;pomosInCycle=idx;renderPips();saveState('user')}
 function renderCtrls(){
   const c=gid('ctrls');
   if(!running&&!finished&&remaining===totalDuration)c.innerHTML='<button class="btn btn-primary" onclick="startTimer()">Start</button>';
@@ -73,7 +73,7 @@ function renderCtrls(){
 
 // ========== TIMER ==========
 function startTimer(){if(totalDuration<=0)return;running=true;finished=false;startedAt=Date.now();pausedRemaining=remaining;fireCounts={};if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,200);reqNotifPerm();schedulePhaseAudio();startKeepalive();renderCtrls()}
-function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();renderTaskList();saveState()}
+function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();renderTaskList();saveState('user')}
 function resumeTimer(){running=true;startedAt=Date.now();if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,200);schedulePhaseAudio();renderCtrls()}
 function tick(){
   if(!running)return;
@@ -97,13 +97,13 @@ function onPhaseComplete(){
   // System notification for backgrounded tabs
   notify(getPL(phase)+' Complete',phase==='work'?'Great work! Time for a break.':'Break over — back to focus.');
   gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';
-  renderStats();renderCtrls();renderTaskList();updateTitle();saveState();
+  renderStats();renderCtrls();renderTaskList();updateTitle();saveState('auto');
   if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);
   else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)
 }
 function advancePhase(){if(phase==='work')phase=pomosInCycle>=cfg.cycle?'long':'short';else{if(phase==='long')pomosInCycle=0;phase='work'}finished=false;fireCounts={};setPhaseTime();renderAll();if((phase!=='work'&&cfg.autoBreak)||(phase==='work'&&cfg.autoWork))setTimeout(startTimer,300)}
-function skipPhase(){running=false;clearInterval(tickId);cancelScheduledAudio();const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);const worked=totalDuration-remaining;if(phase==='work'){if(worked>30)totalFocusSec+=worked;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,worked,'work')}}else if(worked>30){addLog('Focus (partial)',worked,'work')}if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}}else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase)}if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();notify(getPL(phase)+' Skipped','Moving to next phase.');finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';renderStats();renderCtrls();renderTaskList();updateTitle();saveState();if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)}
-function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState()}
+function skipPhase(){running=false;clearInterval(tickId);cancelScheduledAudio();const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);const worked=totalDuration-remaining;if(phase==='work'){if(worked>30)totalFocusSec+=worked;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,worked,'work')}}else if(worked>30){addLog('Focus (partial)',worked,'work')}if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}}else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase)}if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();notify(getPL(phase)+' Skipped','Moving to next phase.');finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';renderStats();renderCtrls();renderTaskList();updateTitle();saveState('user');if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)}
+function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState('user')}
 
 // ========== STOPWATCH ==========
 function swToggle(){if(swRunning){swRunning=false;swPausedEl+=Date.now()-swStartTime;gid('swStartBtn').textContent='Resume';gid('swStartBtn').className='btn btn-primary';maybeStopKeepalive()}else{swRunning=true;swStartTime=Date.now();clearInterval(swTickId);swTickId=setInterval(swTick,100);gid('swStartBtn').textContent='Pause';gid('swStartBtn').className='btn btn-pause';startKeepalive()}}
@@ -118,13 +118,13 @@ function addQuickTimer(){
   const label=(gid('qtLabel').value||'').trim()||'Timer '+fmt(total);
   const sound=gid('qtSound').value;
   quickTimers.push({id:++qtIdCtr,label,totalSec:total,remaining:total,running:false,startedAt:0,pausedRem:total,sound,finished:false});
-  gid('qtLabel').value='';renderQuickTimers();saveState()
+  gid('qtLabel').value='';renderQuickTimers();saveState('user')
 }
 
 function addQuickPreset(mins,secs,label){
   const total=mins*60+secs;
   quickTimers.push({id:++qtIdCtr,label,totalSec:total,remaining:total,running:false,startedAt:0,pausedRem:total,sound:'bell',finished:false});
-  renderQuickTimers();saveState()
+  renderQuickTimers();saveState('user')
 }
 
 function toggleQuickTimer(id){
@@ -141,7 +141,7 @@ function toggleQuickTimer(id){
     qt.running=true;qt.startedAt=Date.now();
     reqNotifPerm();scheduleQtAudio(qt);startKeepalive();
   }
-  ensureQuickTick();renderQuickTimers();saveState()
+  ensureQuickTick();renderQuickTimers();saveState('user')
 }
 
 // Only stop keepalive if nothing is running
@@ -157,13 +157,13 @@ function resetQuickTimer(id){
   if(!qt)return;
   cancelQtAudio(qt);
   qt.running=false;qt.finished=false;qt.remaining=qt.totalSec;qt.pausedRem=qt.totalSec;qt.flashUntil=0;
-  renderQuickTimers();saveState()
+  renderQuickTimers();saveState('user')
 }
 
 function removeQuickTimer(id){
   const qt=quickTimers.find(t=>t.id===id);if(qt)cancelQtAudio(qt);
   quickTimers=quickTimers.filter(t=>t.id!==id);
-  renderQuickTimers();saveState()
+  renderQuickTimers();saveState('user')
 }
 
 function scheduleQtAudio(qt){
@@ -210,7 +210,7 @@ function ensureQuickTick(){
         notify('Timer done',qt.label);
         qt.flashUntil=Date.now()+2000;
         addLog(qt.label,qt.totalSec,'quick');
-        needsRender=true;saveState();
+        needsRender=true;saveState('auto');
       }
     });
     if(!anyRunning){clearInterval(qtGlobalTick);qtGlobalTick=null}
@@ -251,8 +251,8 @@ function renderQuickTimers(){
 setInterval(()=>{if(quickTimers.some(qt=>qt.running))renderQuickTimers()},1000);
 
 // ========== INTERVALS ==========
-function addInterval(){const m=parseInt(gid('intMin').value)||0,s=parseInt(gid('intSec').value)||0,sec=m*60+s;if(sec<=0)return;intervals.push({id:++intIdCtr,intervalSec:sec,label:gid('intLabel').value||'Every '+fmt(sec),chime:gid('intChime').value});gid('intLabel').value='';gid('intMin').value='5';gid('intSec').value='0';renderIntList();if(running)schedulePhaseAudio();saveState()}
-function removeInterval(id){intervals=intervals.filter(i=>i.id!==id);delete fireCounts[id];renderIntList();if(running)schedulePhaseAudio();saveState()}
+function addInterval(){const m=parseInt(gid('intMin').value)||0,s=parseInt(gid('intSec').value)||0,sec=m*60+s;if(sec<=0)return;intervals.push({id:++intIdCtr,intervalSec:sec,label:gid('intLabel').value||'Every '+fmt(sec),chime:gid('intChime').value});gid('intLabel').value='';gid('intMin').value='5';gid('intSec').value='0';renderIntList();if(running)schedulePhaseAudio();saveState('user')}
+function removeInterval(id){intervals=intervals.filter(i=>i.id!==id);delete fireCounts[id];renderIntList();if(running)schedulePhaseAudio();saveState('user')}
 function flashInt(id){lastFlash=id;setTimeout(()=>{if(lastFlash===id){lastFlash=null;renderIntList()}},600);renderIntList()}
 function renderIntList(){const list=gid('intList');gid('intCount').textContent=intervals.length+' set';list.querySelectorAll('.iitem').forEach(e=>e.remove());if(!intervals.length){gid('intEmpty').style.display='';return}gid('intEmpty').style.display='none';const totalEl=totalDuration-remaining;intervals.forEach(iv=>{const fires=fireCounts[iv.id]||0,fl=lastFlash===iv.id,next=(fires+1)*iv.intervalSec-totalEl;const d=document.createElement('div');d.className='iitem'+(fl?' flash':'');d.innerHTML='<div class="idot'+(fl?' flash':fires>0?' active':'')+'"></div><div class="iinfo"><div class="iname">'+esc(iv.label)+'</div><div class="imeta">⟳ every '+fmt(iv.intervalSec)+' · '+CHL[iv.chime]+'</div></div>'+(running||finished?'<div class="istat"><div class="ifires'+(fl?' flash':'')+'">'+fires+'×</div>'+(next>0&&running?'<div class="inext">next '+fmt(next)+'</div>':'')+'</div>':'')+'<button class="irm" onclick="removeInterval('+iv.id+')">×</button>';list.appendChild(d)})}
 

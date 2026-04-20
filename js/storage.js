@@ -154,7 +154,9 @@ function _validateState(s){
 
 // Save — captures task mutations with per-task lastModified stamp for sync
 let _prevTaskSnapshot = null; // used to detect which tasks changed since last save
-function saveState(){
+/** @param {'auto'|'unload'|'user'} [reason] — only 'user' shows the save pill (throttled) */
+function saveState(reason){
+  if(!reason) reason = 'auto';
   if(typeof taskSortBy==='string'&&taskSortBy==='order') taskSortBy='manual';
   // Stamp lastModified on tasks that actually changed since the previous save.
   // This gives sync a reliable "newer wins" comparator without touching every
@@ -227,7 +229,7 @@ function saveState(){
   }
   _idbSet(STORE_KEY, serialized);
   if(typeof syncBroadcast==='function') syncBroadcast();
-  showSaveIndicator();
+  if(reason === 'user') showSaveIndicator();
 
   queueMicrotask(() => {
     if(typeof embedStore === 'undefined' || !embedStore || !embedStore.ensure) return;
@@ -398,7 +400,7 @@ function importData(file){
       s.date = todayKey();
       if(_applyState(s)){
         if(arch) localStorage.setItem(ARCHIVE_KEY, arch);
-        saveState();
+        saveState('user');
         renderAll(); renderLog(); renderGoalList();
         renderIntList(); renderQuickTimers();
         applyTheme(); setTaskView(taskView); setSmartView(smartView);
@@ -678,7 +680,7 @@ function importTasks(file){
     try {
       // Run every task back through _repairTask to normalise types
       tasks = tasks.map(_repairTask).filter(Boolean);
-      saveState();
+      saveState('user');
       if(typeof renderTaskList === 'function') renderTaskList();
       if(typeof renderLists === 'function') renderLists();
     } catch(err){ console.warn('[import] post-save failed', err); }
@@ -827,13 +829,18 @@ function archiveDay(state){
   }catch(e){}
 }
 
+let _saveIndLast = 0;
 function showSaveIndicator(){
   const el = gid('saveInd'); if(!el)return;
+  const now = Date.now();
+  if(now - _saveIndLast < 4000) return;
+  _saveIndLast = now;
   el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'), 1200);
+  clearTimeout(el._saveIndT);
+  el._saveIndT = setTimeout(()=>{ el.classList.remove('show'); }, 900);
 }
 
-// Auto-save every 10s, on tab hide, and on unload
-setInterval(saveState, 10000);
-document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveState(); });
-window.addEventListener('beforeunload', saveState);
+// Auto-save every 10s, on tab hide, and on unload (no save pill)
+setInterval(() => saveState('auto'), 10000);
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveState('auto'); });
+window.addEventListener('beforeunload', () => saveState('unload'));

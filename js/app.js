@@ -1,5 +1,5 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v21';
 const APP_BUILD_DATE = '2026-04-20';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
@@ -68,7 +68,7 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
     };
     window.applyUpdate = () => {
       // Flush any pending state before reload so user doesn't lose recent changes
-      try { if(typeof saveState === 'function') saveState(); } catch(e) {}
+      try { if(typeof saveState === 'function') saveState('unload'); } catch(e) {}
       if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
       // Wait for controllerchange then reload
       let reloaded = false;
@@ -217,7 +217,7 @@ setTimeout(() => {
       u.searchParams.delete('tab');
       const q = u.searchParams.toString();
       history.replaceState(null, '', u.pathname + (q ? '?' + q : '') + u.hash);
-      try { saveState(); } catch(e) {}
+      try { saveState('auto'); } catch(e) {}
     }
   } catch(e) {}
 })();
@@ -266,7 +266,7 @@ setInterval(()=>{
     // Date differs — rollover is happening. Archive the snapshot that has the
     // OLD date, but first flush any in-memory changes (they'll go under the
     // old date, which is correct since they happened "yesterday" in user's clock).
-    if(typeof saveState==='function') saveState();
+    if(typeof saveState==='function') saveState('auto');
     // Re-read after save
     const updated=localStorage.getItem(STORE_KEY);
     if(updated){

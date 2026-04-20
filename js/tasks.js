@@ -1,7 +1,7 @@
 // ========== GOALS ==========
-function addGoal(){const inp=gid('goalInput');if(!inp)return;const text=inp.value.trim();if(!text)return;goals.push({id:++goalIdCtr,text,done:false,doneAt:null,addedAt:timeNow()});inp.value='';renderGoalList();saveState()}
-function toggleGoal(id){const g=goals.find(x=>x.id===id);if(g){g.done=!g.done;g.doneAt=g.done?timeNow():null}renderGoalList();saveState()}
-function removeGoal(id){goals=goals.filter(g=>g.id!==id);renderGoalList();saveState()}
+function addGoal(){const inp=gid('goalInput');if(!inp)return;const text=inp.value.trim();if(!text)return;goals.push({id:++goalIdCtr,text,done:false,doneAt:null,addedAt:timeNow()});inp.value='';renderGoalList();saveState('user')}
+function toggleGoal(id){const g=goals.find(x=>x.id===id);if(g){g.done=!g.done;g.doneAt=g.done?timeNow():null}renderGoalList();saveState('user')}
+function removeGoal(id){goals=goals.filter(g=>g.id!==id);renderGoalList();saveState('user')}
 function renderGoalList(){
   const list=gid('goalList');if(!list)return; // panel removed — skip everything
   const cnt=gid('goalCount');if(cnt)cnt.textContent=goals.filter(g=>g.done).length+' / '+goals.length;
@@ -37,6 +37,85 @@ const PRIORITIES={
   none:{label:'None',icon:'⚐',cls:'priority-none'}
 };
 const PRIORITY_ORDER={urgent:0,high:1,normal:2,low:3,none:4};
+
+// ===== Pareto / Impact scoring =====
+// Derives a single "impact" score per task from existing signals only —
+// no new fields, no persisted state. The 80/20 idea: high-leverage items
+// (impact ÷ effort) rise to the top. All inputs already live on the task.
+const _PARETO_PRIORITY_W = {urgent:4, high:3, normal:1.5, low:0.5, none:0.5};
+const _PARETO_EFFORT_MULT = {xs:1.35, s:1.15, m:1.0, l:0.85, xl:0.7};
+
+function computeImpactScore(t, ctx){
+  if(!t || t.archived || t.status==='done') return 0;
+  const today = ctx && ctx.today ? ctx.today : todayISO();
+  const blockersMap = ctx && ctx.blockersMap ? ctx.blockersMap : null;
+
+  const priorityW = _PARETO_PRIORITY_W[t.priority||'none'] ?? 0.5;
+
+  let dueW = 0;
+  if(t.dueDate){
+    if(t.dueDate < today) dueW = 3;                 // overdue
+    else if(t.dueDate === today) dueW = 2.2;        // today
+    else{
+      // Linear falloff over the next 7 days
+      const d1 = new Date(today+'T00:00:00');
+      const d2 = new Date(t.dueDate+'T00:00:00');
+      const days = Math.round((d2-d1)/86400000);
+      if(days <= 7) dueW = Math.max(0, 1.6 - days*0.18);
+    }
+  }
+
+  // Unblocking: how many *active* tasks are blocked by this one.
+  // Unblocking 1+ others is leverage; cap the contribution.
+  let unblocksW = 0;
+  if(blockersMap){
+    const n = blockersMap.get(t.id) || 0;
+    if(n > 0) unblocksW = Math.min(2, 0.8 + 0.4*n);
+  }
+
+  // Values alignment: small boost for each dominant value tagged (cap 3).
+  const vals = Array.isArray(t.valuesAlignment) ? t.valuesAlignment.length : 0;
+  const valuesW = Math.min(vals, 3) * 0.35;
+
+  const starW = t.starred ? 0.6 : 0;
+
+  const raw = priorityW + dueW + unblocksW + valuesW + starW;
+  const mult = _PARETO_EFFORT_MULT[t.effort] ?? 1.0;
+  return raw * mult;
+}
+
+// Per-render cache so sort + filter + badge all agree on the same top set.
+let _paretoTopSet = new Set();
+let _paretoScoreMap = new Map();
+
+function refreshParetoTopSet(){
+  _paretoTopSet = new Set();
+  _paretoScoreMap = new Map();
+  const today = todayISO();
+  // Build blockersMap: id -> count of active tasks that list `id` in blockedBy
+  const blockersMap = new Map();
+  for(const x of tasks){
+    if(x.archived || x.status==='done') continue;
+    const bb = Array.isArray(x.blockedBy) ? x.blockedBy : [];
+    for(const id of bb) blockersMap.set(id, (blockersMap.get(id)||0) + 1);
+  }
+  const ctx = {today, blockersMap};
+  const pool = [];
+  for(const t of tasks){
+    if(t.archived || t.status==='done') continue;
+    const s = computeImpactScore(t, ctx);
+    _paretoScoreMap.set(t.id, s);
+    pool.push(t);
+  }
+  if(pool.length === 0) return;
+  pool.sort((a,b)=>(_paretoScoreMap.get(b.id)||0)-(_paretoScoreMap.get(a.id)||0));
+  // Top 20% (min 1, max 20 so the chip stays meaningful on huge lists)
+  const cut = Math.min(20, Math.max(1, Math.ceil(pool.length*0.2)));
+  for(let i=0; i<cut; i++) _paretoTopSet.add(pool[i].id);
+}
+
+function isParetoTop(id){return _paretoTopSet.has(id)}
+function getImpactScore(id){return _paretoScoreMap.get(id)||0}
 
 function defaultTaskProps(){return{
   status:'open',priority:'none',tags:[],dueDate:null,startDate:null,
@@ -112,6 +191,14 @@ function parseQuickAdd(raw){
 
 async function addTask(){
   const inp=gid('taskInput'),raw=inp.value.trim();if(!raw)return;
+  if(/\r?\n/.test(raw)){
+    const { items, skippedLong } = parseBulkTaskPaste(raw);
+    if(items.length >= 2){
+      openBulkImportModal(items, skippedLong);
+      inp.value='';
+      return;
+    }
+  }
   ensureDefaultList();
   let name, props;
   if(typeof parseQuickAddAsync === 'function'){
@@ -128,8 +215,102 @@ async function addTask(){
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId:null,collapsed:false
   },defaultTaskProps(),props));
-  inp.value='';renderTaskList();saveState()
+  inp.value='';renderTaskList();saveState('user')
 }
+
+const BULK_LINE_MAX = 200;
+function parseBulkTaskPaste(raw){
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const bulletRe = /^\s*(?:[-*•·]|[\d]+[.)])\s+/;
+  const items = [];
+  let skippedLong = 0;
+  for(const line of lines){
+    const cleaned = line.replace(bulletRe, '').trim();
+    if(!cleaned) continue;
+    if(cleaned.length > BULK_LINE_MAX){ skippedLong++; continue; }
+    items.push(cleaned);
+  }
+  return { items, skippedLong };
+}
+
+function taskInputPaste(e){
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if(!text || !/\r?\n/.test(text)) return;
+  const { items, skippedLong } = parseBulkTaskPaste(text);
+  if(items.length < 2) return;
+  e.preventDefault();
+  openBulkImportModal(items, skippedLong);
+}
+
+function openBulkImportModal(items, skippedLong){
+  const ov = gid('bulkImportModal');
+  const ta = gid('bulkImportTextarea');
+  const hint = gid('bulkImportHint');
+  if(!ov || !ta) return;
+  ta.value = items.join('\n');
+  let hintHtml = 'Each line becomes one task. Quick-add tokens work per line (<code>@urgent</code>, <code>#tag</code>, <code>tomorrow</code>, etc.).';
+  if(skippedLong > 0){
+    hintHtml = '<strong class="bulk-import-warn">' + skippedLong + ' line(s) skipped</strong> (over ' + BULK_LINE_MAX + ' characters). ' + hintHtml;
+  }
+  if(hint) hint.innerHTML = hintHtml;
+  _updateBulkImportButtonState();
+  ta.oninput = _updateBulkImportButtonState;
+  ov.classList.add('open');
+  setTimeout(() => ta.focus(), 30);
+}
+
+function _updateBulkImportButtonState(){
+  const ta = gid('bulkImportTextarea');
+  const btn = gid('bulkImportConfirm');
+  const title = gid('bulkImportTitle');
+  if(!ta || !btn) return;
+  const n = ta.value.split(/\r?\n/).map(l => l.trim()).filter(Boolean).length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? 'Add ' + n + ' task' + (n !== 1 ? 's' : '') : 'Add tasks';
+  if(title) title.textContent = n ? 'Import ' + n + ' task' + (n !== 1 ? 's' : '') : 'Import tasks';
+}
+
+function closeBulkImportModal(){
+  const ov = gid('bulkImportModal');
+  if(ov) ov.classList.remove('open');
+  const ta = gid('bulkImportTextarea');
+  if(ta) ta.oninput = null;
+}
+
+async function confirmBulkImport(){
+  const ta = gid('bulkImportTextarea');
+  if(!ta) return;
+  const lines = ta.value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if(!lines.length) return;
+  ensureDefaultList();
+  closeBulkImportModal();
+  for(const line of lines){
+    let name, props;
+    if(typeof parseQuickAddAsync === 'function'){
+      const parsed = await parseQuickAddAsync(line);
+      name = parsed.name;
+      props = parsed.props;
+    } else {
+      const p = parseQuickAdd(line);
+      name = p.name;
+      props = p.props;
+    }
+    if(!name){ name = line; props = {}; }
+    tasks.push(Object.assign({
+      id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
+      parentId:null,collapsed:false
+    },defaultTaskProps(),props));
+  }
+  const inp = gid('taskInput');
+  if(inp) inp.value = '';
+  renderTaskList();
+  saveState('user');
+  if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
+  if(typeof scheduleIntelDupRefresh === 'function') scheduleIntelDupRefresh();
+}
+
+window.closeBulkImportModal = closeBulkImportModal;
+window.confirmBulkImport = confirmBulkImport;
 function findTask(id){return tasks.find(t=>t.id===id)}
 
 // Tree helpers
@@ -203,10 +384,10 @@ function addSubtask(parentId){
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId,collapsed:false
   },defaultTaskProps(),{listId:parent.listId}));
-  subtaskPromptParent=null;renderTaskList();saveState()
+  subtaskPromptParent=null;renderTaskList();saveState('user')
 }
 function cancelSubtaskPrompt(){subtaskPromptParent=null;renderTaskList()}
-function toggleCollapse(taskId){event&&event.stopPropagation();const t=findTask(taskId);if(!t)return;t.collapsed=!t.collapsed;renderTaskList();saveState()}
+function toggleCollapse(taskId){event&&event.stopPropagation();const t=findTask(taskId);if(!t)return;t.collapsed=!t.collapsed;renderTaskList();saveState('user')}
 
 // Time tracking
 function toggleTask(id){
@@ -216,7 +397,7 @@ function toggleTask(id){
     // Auto-set status to In Progress when starting time
     const t=findTask(id);if(t&&t.status==='open')t.status='progress';
   }
-  renderTaskList();renderBanner();saveState()
+  renderTaskList();renderBanner();saveState('user')
 }
 
 function removeTask(id){
@@ -246,7 +427,7 @@ function removeTask(id){
     }
     toArchive.forEach(tid=>{const t=findTask(tid);if(t)t.archived=true});
   }
-  renderTaskList();renderBanner();saveState()
+  renderTaskList();renderBanner();saveState('user')
 }
 
 function restoreTask(id){
@@ -255,12 +436,12 @@ function restoreTask(id){
   t.archived=false;
   // Restore any descendants too
   getTaskDescendantIds(id).forEach(did=>{const d=findTask(did);if(d)d.archived=false});
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 function emptyArchive(){
   tasks=tasks.filter(t=>!t.archived);
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 // Smart Views
@@ -268,14 +449,14 @@ function setSmartView(v){
   smartView=v;
   document.querySelectorAll('.sv-chip').forEach(el=>{el.classList.toggle('active',el.dataset.view===v)});
   const notice=gid('archivedNotice');if(notice)notice.style.display=v==='archived'?'flex':'none';
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 // Star toggle
 function toggleStar(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
-  t.starred=!t.starred;renderTaskList();saveState()
+  t.starred=!t.starred;renderTaskList();saveState('user')
 }
 
 // Reorder (manual)
@@ -290,7 +471,7 @@ function reorderTask(id,dir){
   // Swap order values
   const a=siblings[idx],b=siblings[target];
   const tmp=a.order;a.order=b.order;b.order=tmp;
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 // Drag-drop handler for list view
@@ -308,7 +489,7 @@ function handleTaskDrop(srcId,targetId,position){
   siblings.forEach((s,i)=>{s.order=i*10});
   // Force manual sort when user drags
   if(taskSortBy!=='manual'){taskSortBy='manual';const sel=gid('taskSortSel');if(sel)sel.value='manual'}
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 // Subtask completion progress
@@ -365,7 +546,7 @@ function checkReminders(){
       }else if(cfg.sound){playChime('bell')}
     }
   });
-  if(fired)saveState()
+  if(fired)saveState('auto')
 }
 // Check reminders every 30s
 setInterval(checkReminders,30000);
@@ -409,7 +590,7 @@ function cycleStatus(id){
   t.status=STATUS_ORDER[(idx+1)%STATUS_ORDER.length];
   if(t.status==='done')t.completedAt=timeNow();
   else t.completedAt=null;
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 function toggleTaskDoneQuick(id){
@@ -434,7 +615,7 @@ function toggleTaskDoneQuick(id){
       }
     },10);
   }
-  renderTaskList();saveState()
+  renderTaskList();saveState('user')
 }
 
 // Haptic helper — vibrate on supporting devices (iOS Safari + all Android)
@@ -468,7 +649,7 @@ function addList(){
   lists.push({id:++listIdCtr,name:name.trim(),color,description});
   activeListId=listIdCtr;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
-  renderLists();renderTaskList();saveState()
+  renderLists();renderTaskList();saveState('user')
 }
 function editList(id){
   event&&event.stopPropagation();
@@ -481,7 +662,7 @@ function editList(id){
   l.name=name.trim();
   l.description=description.trim();
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
-  renderLists();renderTaskList();saveState()
+  renderLists();renderTaskList();saveState('user')
 }
 function removeList(id){
   event&&event.stopPropagation();
@@ -494,9 +675,9 @@ function removeList(id){
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
   if(activeListId===id)activeListId=fallbackId;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
-  renderLists();renderTaskList();saveState()
+  renderLists();renderTaskList();saveState('user')
 }
-function switchList(id){activeListId=id;renderLists();renderTaskList();saveState()}
+function switchList(id){activeListId=id;renderLists();renderTaskList();saveState('user')}
 function renderLists(){
   const bar=gid('listsBar');if(!bar)return;
   ensureDefaultList();
@@ -569,7 +750,7 @@ function setTaskView(v){
   if(gid('calendarView'))gid('calendarView').style.display=v==='calendar'?'':'none';
   document.body.classList.toggle('cal-active-mobile',v==='calendar');
   renderTaskList();
-  saveState()
+  saveState('user')
 }
 function updateMobileViewToggle(){/* alias for call sites */}
 function matchesFilters(t){
@@ -591,6 +772,7 @@ function matchesFilters(t){
   else if(smartView==='overdue'){if(!t.dueDate||t.dueDate>=today||t.status==='done')return false}
   else if(smartView==='unscheduled'){if(t.dueDate||t.status==='done')return false}
   else if(smartView==='starred'){if(!t.starred||t.status==='done')return false}
+  else if(smartView==='impact'){if(t.status==='done'||!_paretoTopSet.has(t.id))return false}
   else if(smartView==='completed'){if(t.status!=='done')return false}
   // Search — semantic (cosine) or substring
   if(taskFilters.search){
@@ -632,6 +814,14 @@ function sortTasks(arr){
       if(!a.dueDate&&b.dueDate)return 1;if(a.dueDate&&!b.dueDate)return -1;
       if(a.dueDate&&b.dueDate)return a.dueDate.localeCompare(b.dueDate);
       return (a.order||0)-(b.order||0);
+    }
+    if(by==='impact'){
+      const sa=_paretoScoreMap.get(a.id)||0, sb=_paretoScoreMap.get(b.id)||0;
+      if(sa!==sb) return sb-sa;
+      // Stable tiebreaker: starred, then due, then priority
+      if(!!b.starred-!!a.starred) return !!b.starred-!!a.starred;
+      if(a.dueDate&&b.dueDate&&a.dueDate!==b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+      return (PRIORITY_ORDER[a.priority||'none']||9)-(PRIORITY_ORDER[b.priority||'none']||9);
     }
     if(by==='name')return a.name.localeCompare(b.name);
     if(by==='priority')return (PRIORITY_ORDER[a.priority||'none']||9)-(PRIORITY_ORDER[b.priority||'none']||9);
@@ -706,6 +896,7 @@ function renderSmartViewCounts(){
   set('svcOverdue',activeNotDone.filter(t=>t.dueDate&&t.dueDate<today).length);
   set('svcUnscheduled',activeNotDone.filter(t=>!t.dueDate).length);
   set('svcStarred',activeNotDone.filter(t=>t.starred).length);
+  set('svcImpact',activeNotDone.filter(t=>_paretoTopSet.has(t.id)&&inList(t)).length);
   set('svcCompleted',active.filter(t=>t.status==='done').length);
   set('svcArchived',tasks.filter(t=>t.archived&&inList(t)).length);
 }
@@ -715,6 +906,7 @@ function renderTaskList(){
   const list=gid('taskList');
   if(!list)return;
   renderLists();
+  refreshParetoTopSet();
   renderTodayBanner();
   renderSmartViewCounts();
   const visibleTasks=tasks.filter(matchesFilters);
@@ -814,7 +1006,7 @@ function renderGroupedTasks(visibleTasks){
       +'<span class="ts-color" style="background:'+getGroupColor(k)+'"></span>'
       +'<span class="ts-label">'+esc(getGroupLabel(k))+'</span>'
       +'<span class="ts-count">'+items.length+'</span>';
-    hdr.onclick=function(){collapsedSections[taskGroupBy+':'+k]=!isCol;renderTaskList();saveState()};
+    hdr.onclick=function(){collapsedSections[taskGroupBy+':'+k]=!isCol;renderTaskList();saveState('user')};
     list.appendChild(hdr);
     if(!isCol){
       items.forEach(t=>{
@@ -837,18 +1029,18 @@ function addChecklistItem(taskId,text){
   const t=findTask(taskId);if(!t||!text.trim())return;
   if(!t.checklist)t.checklist=[];
   t.checklist.push({id:++_clIdCtr,text:text.trim(),done:false,doneAt:null});
-  renderChecklist(taskId);saveState();
+  renderChecklist(taskId);saveState('user');
 }
 function toggleChecklistItem(taskId,itemId){
   const t=findTask(taskId);if(!t)return;
   const item=t.checklist.find(c=>c.id===itemId);if(!item)return;
   item.done=!item.done;item.doneAt=item.done?timeNow():null;
-  renderChecklist(taskId);saveState();
+  renderChecklist(taskId);saveState('user');
 }
 function removeChecklistItem(taskId,itemId){
   const t=findTask(taskId);if(!t)return;
   t.checklist=t.checklist.filter(c=>c.id!==itemId);
-  renderChecklist(taskId);saveState();
+  renderChecklist(taskId);saveState('user');
 }
 function renderChecklist(taskId){
   const t=findTask(taskId);if(!t)return;
@@ -877,12 +1069,12 @@ function addTaskNote(taskId,text){
   const t=findTask(taskId);if(!t||!text.trim())return;
   if(!t.notes)t.notes=[];
   t.notes.unshift({id:++_noteIdCtr,text:text.trim(),createdAt:timeNow()});
-  renderTaskNotes(taskId);saveState();
+  renderTaskNotes(taskId);saveState('user');
 }
 function removeTaskNote(taskId,noteId){
   const t=findTask(taskId);if(!t)return;
   t.notes=t.notes.filter(n=>n.id!==noteId);
-  renderTaskNotes(taskId);saveState();
+  renderTaskNotes(taskId);saveState('user');
 }
 function renderTaskNotes(taskId){
   const t=findTask(taskId);if(!t)return;
@@ -907,12 +1099,12 @@ function addBlockedBy(taskId,blockerIdStr){
   const blockerId=parseInt(blockerIdStr);if(!blockerId||blockerId===taskId)return;
   if(!t.blockedBy)t.blockedBy=[];
   if(!t.blockedBy.includes(blockerId))t.blockedBy.push(blockerId);
-  renderBlockedBy(taskId);saveState();
+  renderBlockedBy(taskId);saveState('user');
 }
 function removeBlockedBy(taskId,blockerId){
   const t=findTask(taskId);if(!t)return;
   t.blockedBy=(t.blockedBy||[]).filter(id=>id!==blockerId);
-  renderBlockedBy(taskId);saveState();
+  renderBlockedBy(taskId);saveState('user');
 }
 function renderBlockedBy(taskId){
   const t=findTask(taskId);if(!t)return;
@@ -935,3 +1127,8 @@ function renderBlockedBy(taskId){
     chips.appendChild(c);
   });
 }
+
+(function(){
+  const inp = typeof gid === 'function' ? gid('taskInput') : null;
+  if(inp) inp.addEventListener('paste', taskInputPaste);
+})();

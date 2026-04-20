@@ -100,7 +100,7 @@
     <!-- Add task form: TOP — primary action -->
     <div class="task-form">
       <div class="task-input-wrap">
-        <input class="task-input" id="taskInput" placeholder="Add a task... (try: Buy milk tomorrow @urgent #shopping)"
+        <input class="task-input" id="taskInput" placeholder="Add a task… or paste multiple lines to import"
           oninput="maybeShowEnhanceBtn()"
           onkeydown="if(event.key==='Enter'){if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}}">
         <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)">✨</button>
@@ -127,6 +127,7 @@
       <button class="sv-chip" data-view="overdue" onclick="setSmartView('overdue')"><span class="sv-icon">⚠</span>Overdue<span class="sv-count" id="svcOverdue">0</span></button>
       <button class="sv-chip" data-view="unscheduled" onclick="setSmartView('unscheduled')"><span class="sv-icon">○</span>Unscheduled<span class="sv-count" id="svcUnscheduled">0</span></button>
       <button class="sv-chip" data-view="starred" onclick="setSmartView('starred')"><span class="sv-icon">★</span>Starred<span class="sv-count" id="svcStarred">0</span></button>
+      <button class="sv-chip" data-view="impact" onclick="setSmartView('impact')" title="Top ~20% by leverage — derived from priority, due, effort, unblocks, values, star"><span class="sv-icon">⚡</span>Impact<span class="sv-count" id="svcImpact">0</span></button>
       <button class="sv-chip" data-view="completed" onclick="setSmartView('completed')"><span class="sv-icon">✓</span>Done<span class="sv-count" id="svcCompleted">0</span></button>
       <button class="sv-chip" data-view="archived" onclick="setSmartView('archived')"><span class="sv-icon">🗂</span>Archive<span class="sv-count" id="svcArchived">0</span></button>
     </div>
@@ -188,6 +189,7 @@
         <select class="task-tb-sel" id="taskSortSel" onchange="updateTaskFilters()">
           <option value="manual">Sort: Manual</option>
           <option value="smart">Sort: Smart (starred, due, priority)</option>
+          <option value="impact">Sort: Impact (Pareto 80/20)</option>
           <option value="due">Sort: Due date</option>
           <option value="priority">Sort: Priority</option>
           <option value="created">Sort: Created</option>
@@ -288,13 +290,8 @@
   </div>
 
   <!-- Task understanding (on-device embeddings) -->
-  <div class="panel" data-tab="tools">
-    <div class="shdr">
-      <div class="sdot" style="background:var(--accent)"></div>
-      <span class="slbl">Task understanding</span>
-      <span class="scnt" style="font-size:11px;color:var(--text-3)">On device</span>
-    </div>
-    <div id="intelPanel" style="width:100%"></div>
+  <div class="panel intel-tools-panel" data-tab="tools">
+    <div id="intelPanel" class="intel-panel-root"></div>
   </div>
 
   <!-- Stopwatch -->
@@ -494,6 +491,25 @@
   <div class="cmdk-panel">
     <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views..." oninput="renderCmdK()" onkeydown="cmdkKeydown(event)">
     <div class="cmdk-results" id="cmdkResults"></div>
+  </div>
+</div>
+
+<!-- Bulk import (paste multiple lines) -->
+<div class="modal-overlay" id="bulkImportModal" onclick="if(event.target===this)closeBulkImportModal()">
+  <div class="modal bulk-import-modal" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <span id="bulkImportTitle">Import tasks</span>
+      <button type="button" class="modal-close" onclick="closeBulkImportModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="bulkImportHint" class="bulk-import-hint"></p>
+      <label class="bulk-import-label" for="bulkImportTextarea">One task per line</label>
+      <textarea id="bulkImportTextarea" class="mfield-textarea bulk-import-textarea" rows="12" spellcheck="false"></textarea>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeBulkImportModal()">Cancel</button>
+      <button type="button" class="mfoot-btn mfoot-save" id="bulkImportConfirm" onclick="confirmBulkImport()">Add tasks</button>
+    </div>
   </div>
 </div>
 
