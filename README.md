@@ -2,7 +2,7 @@
 
 A privacy-first Pomodoro timer + ClickUp-style task manager that runs entirely in your browser. No account, no tracking, no sync. Everything stays on your device.
 
-<img src="icon-512.png" alt="STUPInD" width="120" />
+<img src="icons/icon-512.png" alt="STUPInD" width="120" />
 
 ## Features
 
@@ -70,17 +70,16 @@ See [DEPLOY.md](DEPLOY.md) for step-by-step guides for:
 ## File structure
 
 ```
-stupind-pwa/
-├── index.html                  Main app (single-file, self-contained)
-├── manifest.json               PWA manifest
-├── sw.js                       Service worker (offline cache)
-├── icon-192.png                PWA icon (Android)
-├── icon-512.png                PWA icon (Android splash)
-├── icon-maskable-512.png       PWA icon (adaptive masking)
-├── apple-touch-icon.png        iOS home screen icon (180×180)
-├── favicon-32.png              Browser tab icon
-├── README.md                   This file
-└── DEPLOY.md                   Deployment guides
+STUPInD/
+├── index.html
+├── manifest.json
+├── sw.js
+├── favicon.ico
+├── css/main.css
+├── js/                         App modules (utils → … → app.js)
+├── icons/                      PWA icons (192, 512, maskable, apple-touch, etc.)
+├── README.md
+└── DEPLOY.md
 ```
 
 ## Browser support

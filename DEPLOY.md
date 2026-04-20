@@ -2,10 +2,16 @@
 
 STUPInD is a static PWA — no build step, no server-side code, no API. You just need to host the files.
 
+## Web app manifest `id`
+
+[`manifest.json`](manifest.json) uses `"id": "./"`. The browser resolves it relative to the manifest URL, so the installed app identity matches **whatever directory hosts** `index.html` and `manifest.json` — site root (`https://example.com/`) or a subpath (`https://<user>.github.io/stupind/`) without editing the file.
+
+Changing `id` later can make existing installs look like a separate app until old entries are removed.
+
 ## Option 1: Netlify (easiest, free, 30 seconds)
 
 1. Go to https://app.netlify.com/drop
-2. Drag the entire `stupind-pwa` folder onto the page
+2. Drag the repository root (all project files) onto the page
 3. Netlify gives you a URL like `https://random-name.netlify.app`
 4. Visit the URL on your phone → install as PWA
 
@@ -16,7 +22,7 @@ STUPInD is a static PWA — no build step, no server-side code, no API. You just
 ## Option 2: GitHub Pages (free, permanent URL)
 
 1. Create a new GitHub repo (e.g., `stupind`)
-2. Upload all files from `stupind-pwa/` to the repo root
+2. Upload all project files to the repo root
 3. Repo Settings → Pages → Source: `main` branch, `/` (root)
 4. Wait ~2 minutes, then visit `https://<username>.github.io/stupind/`
 
@@ -25,7 +31,7 @@ STUPInD is a static PWA — no build step, no server-side code, no API. You just
 ## Option 3: Vercel (free, fast)
 
 ```bash
-cd stupind-pwa
+cd /path/to/STUPInD
 npx vercel
 ```
 
@@ -44,14 +50,14 @@ Follow the prompts — it'll give you a URL.
 
 ## Option 5: Your own server (Nginx example)
 
-Copy the `stupind-pwa/` folder to your server. Nginx config:
+Copy the project folder to your server. Nginx config:
 
 ```nginx
 server {
     listen 443 ssl http2;
     server_name stupind.example.com;
 
-    root /var/www/stupind-pwa;
+    root /var/www/stupind;
     index index.html;
 
     # Cache static assets for 1 year
@@ -84,7 +90,7 @@ server {
 ## Option 6: Python one-liner (LAN / local test)
 
 ```bash
-cd stupind-pwa
+cd /path/to/STUPInD
 python3 -m http.server 8080
 # Open http://YOUR-LAN-IP:8080 from your phone (same Wi-Fi)
 ```
@@ -96,7 +102,7 @@ python3 -m http.server 8080
 ## Option 7: Caddy (auto-HTTPS, one command)
 
 ```bash
-caddy file-server --domain stupind.example.com --root ./stupind-pwa
+caddy file-server --domain stupind.example.com --root .
 ```
 
 ---
@@ -131,7 +137,7 @@ After deploying, visit the site and open DevTools (desktop) or Safari Web Inspec
 
 **"Offline doesn't work"**
 - First visit caches everything; reload once while online before testing offline
-- Check Application → Cache Storage in DevTools — should see `stupind-v1` cache with all assets
+- Check Application → Cache Storage in DevTools — should see a `stupind-v*` cache (version matches [sw.js](sw.js)) with precached assets
 
 **"Audio doesn't fire in background"**
 - User must interact with the page first (browser autoplay policy)
@@ -142,12 +148,14 @@ After deploying, visit the site and open DevTools (desktop) or Safari Web Inspec
 
 ## Custom icon
 
-Want a different icon? Replace these files with your own PNGs (keep the same names and sizes):
-- `icon-192.png` (192×192)
-- `icon-512.png` (512×512)
-- `icon-maskable-512.png` (512×512, safe zone in center 80%)
-- `apple-touch-icon.png` (180×180)
-- `favicon-32.png` (32×32)
+Want a different icon? Replace these files under `icons/` with your own PNGs (keep the same names and sizes):
+- `icons/icon-192.png` (192×192)
+- `icons/icon-512.png` (512×512)
+- `icons/icon-maskable-512.png` (512×512, safe zone in center 80%)
+- `icons/apple-touch-icon.png` (180×180)
+- `icons/favicon-32.png` (32×32)
+
+Root `favicon.ico` is separate; update if you replace the browser tab icon.
 
 Then update `manifest.json` colors to match your brand:
 - `background_color` — splash screen background
