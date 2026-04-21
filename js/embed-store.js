@@ -10,6 +10,9 @@ const STORE_META = 'meta';
 const META_SCHWARTZ_KEY = 'schwartz_vecs_v1';
 const SCHWARTZ_MODEL_VER = 'gte-small';
 
+/** Canonical Map from last IDB read; updated incrementally on put/purge for fast embedStore.all() */
+let _embedAllCache = null;
+
 function _openDb(){
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(INTEL_DB, INTEL_DB_VER);
@@ -39,16 +42,20 @@ function hashTaskText(name, description){
 
 const embedStore = {
   async put(taskId, textHash, vec){
+    const f32 = vec instanceof Float32Array ? vec : new Float32Array(vec);
     const db = await _openDb();
     await new Promise((resolve, reject) => {
       const tx = _tx(db, [STORE_EMB], 'readwrite');
       const st = tx.objectStore(STORE_EMB);
-      const rec = { taskId, textHash, vec: vec.buffer ? vec.buffer.slice(vec.byteOffset, vec.byteOffset + vec.byteLength) : vec };
+      const rec = { taskId, textHash, vec: f32.buffer ? f32.buffer.slice(f32.byteOffset, f32.byteOffset + f32.byteLength) : f32 };
       st.put(rec);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
     db.close();
+    if(_embedAllCache){
+      _embedAllCache.set(taskId, { textHash, vec: new Float32Array(f32) });
+    }
   },
 
   async get(taskId){
@@ -66,6 +73,7 @@ const embedStore = {
 
   /** @returns {Promise<Map<number, {vec: Float32Array, textHash: string}>>} */
   async all(){
+    if(_embedAllCache) return new Map(_embedAllCache);
     const db = await _openDb();
     const map = new Map();
     await new Promise((resolve, reject) => {
@@ -84,7 +92,8 @@ const embedStore = {
       rq.onerror = () => reject(rq.error);
     });
     db.close();
-    return map;
+    _embedAllCache = map;
+    return new Map(_embedAllCache);
   },
 
   async ensure(task){
@@ -109,6 +118,9 @@ const embedStore = {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
+    if(_embedAllCache){
+      taskIds.forEach(id => _embedAllCache.delete(id));
+    }
   },
 
   async cleanOrphans(){

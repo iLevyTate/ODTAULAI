@@ -279,53 +279,194 @@ function executeIntelOp(op){
   return snap;
 }
 
-function _describeOp(op){
-  const a = op.args;
+function _pendingStableArrJson(arr){
+  return JSON.stringify([...(arr || [])].map(String).sort());
+}
+
+function _pendingValsEqual(field, cur, next){
+  if(cur === next) return true;
+  if(Array.isArray(cur) && Array.isArray(next)){
+    return _pendingStableArrJson(cur) === _pendingStableArrJson(next);
+  }
+  const c = cur == null || cur === '' ? null : cur;
+  const n = next == null || next === '' ? null : next;
+  return c === n;
+}
+
+function _humanizeFieldKey(k){
+  const map = {
+    priority: 'Priority',
+    category: 'Life category',
+    context: 'Context',
+    effort: 'Effort',
+    energyLevel: 'Energy',
+    tags: 'Tags',
+    valuesAlignment: 'Values alignment',
+    name: 'Name',
+    status: 'Status',
+    dueDate: 'Due date',
+    startDate: 'Start date',
+    description: 'Description',
+    starred: 'Starred',
+    listId: 'List',
+  };
+  if(map[k]) return map[k];
+  return k.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
+}
+
+function _formatFieldDisplay(field, val){
+  if(val == null || val === '') return '—';
+  if(field === 'category'){
+    const d = (typeof getCategoryDef === 'function') ? getCategoryDef(val) : null;
+    return d ? d.label : String(val);
+  }
+  if(field === 'context'){
+    const d = (typeof getContextDef === 'function') ? getContextDef(val) : null;
+    return d ? d.label : String(val);
+  }
+  if(field === 'valuesAlignment' && Array.isArray(val)){
+    return val.map(k => (SCHWARTZ[k] ? k.replace(/-/g, ' ') : k)).join(', ') || '—';
+  }
+  if(field === 'tags' && Array.isArray(val)){
+    return val.length ? val.map(t => '#' + t).join(', ') : '—';
+  }
+  if(field === 'starred') return val ? 'Yes' : 'No';
+  return String(val).slice(0, 120);
+}
+
+function _fieldConfidenceScore(fc, field){
+  if(!fc || !fc[field]) return null;
+  const o = fc[field];
+  if(typeof o.confidence === 'number') return o.confidence;
+  return null;
+}
+
+function _updateTaskFieldChanges(t, args, fieldConfidence){
+  const skip = new Set(['id', 'valuesNote']);
+  const out = [];
+  if(!t){
+    out.push({ field: '_missing', fromVal: null, toVal: null, confidence: null, note: 'Task not found' });
+    return out;
+  }
+  Object.keys(args).forEach(k => {
+    if(skip.has(k)) return;
+    const v = args[k];
+    const cur = t[k];
+    if(_pendingValsEqual(k, cur, v)) return;
+    let conf = _fieldConfidenceScore(fieldConfidence, k);
+    const row = { field: k, fromVal: cur, toVal: v, confidence: conf, note: '' };
+    out.push(row);
+  });
+  if(args.valuesNote && args.valuesAlignment){
+    const row = out.find(x => x.field === 'valuesAlignment');
+    if(row) row.note = String(args.valuesNote).slice(0, 200);
+  }
+  return out;
+}
+
+function _pendingConfPill(confidence){
+  if(confidence == null || typeof confidence !== 'number') return '';
+  const pct = Math.round(Math.max(0, Math.min(1, confidence)) * 100);
+  return `<span class="pending-confidence-pill" title="Model vote confidence">${pct}%</span>`;
+}
+
+function _pendingIcon(name){
+  return (window.icon && window.icon(name, { size: 14, cls: 'pending-simple-ic-svg' })) || '';
+}
+
+/**
+ * @returns {{ kind:'update' } | { kind:'simple', title:string, taskName:string, detail:string, icon:string, danger:boolean }}
+ */
+function _describeOpStructured(op){
+  const a = op.args || {};
   const t = a.id ? findTask(a.id) : null;
-  const nm = t ? `"${t.name.slice(0,40)}"` : (a.name ? `"${String(a.name).slice(0,40)}"` : '');
+  const taskName = t ? t.name.slice(0, 56) : (a.name ? String(a.name).slice(0, 56) : '');
+  const parts = keys => keys.filter(k => a[k] != null).map(k => _humanizeFieldKey(k) + ': ' + _formatFieldDisplay(k, a[k])).join(' · ');
+
   switch(op.name){
-    case 'CREATE_TASK': return `Create ${nm}` + _flds(a, ['priority','category','dueDate','effort']);
-    case 'UPDATE_TASK': return `✎ Update ${nm}` + _chgs(t, a);
-    case 'MARK_DONE': return `✓ Done: ${nm}` + (a.completionNote ? ` — "${String(a.completionNote).slice(0,40)}"` : '');
-    case 'REOPEN': return `↻ Reopen: ${nm}`;
-    case 'TOGGLE_STAR': return `${t?.starred ? '☆ Unstar' : '★ Star'}: ${nm}`;
-    case 'ARCHIVE_TASK': return `Archive: ${nm}`;
-    case 'RESTORE_TASK': return `♻ Restore: ${nm}`;
-    case 'DELETE_TASK': return `DELETE FOREVER: ${nm}`;
-    case 'DUPLICATE_TASK': return `⎘ Duplicate: ${nm}`;
-    case 'MOVE_TASK': return `↱ Move ${nm} → parent #${a.newParentId || '(top)'}`;
-    case 'CHANGE_LIST': { const l = lists.find(x => x.id === a.listId); return `↦ Move ${nm} → "${l?.name || '#' + a.listId}"`; }
-    case 'ADD_NOTE': return `📝 Note on ${nm}: "${String(a.text || '').slice(0,50)}"`;
-    case 'ADD_CHECKLIST': return `☐ Checklist on ${nm}: "${String(a.text || '').slice(0,50)}"`;
-    case 'TOGGLE_CHECK': return `☑ Toggle check #${a.checkId} on ${nm}`;
-    case 'REMOVE_CHECK': return `✕ Remove check #${a.checkId} from ${nm}`;
-    case 'ADD_TAG': return `🏷 +tag "${a.tag}" on ${nm}`;
-    case 'REMOVE_TAG': return `✕ -tag "${a.tag}" from ${nm}`;
-    case 'ADD_BLOCKER': { const b = findTask(a.blockerId); return `🚫 Block ${nm} by "${b?.name.slice(0,30) || '#' + a.blockerId}"`; }
-    case 'REMOVE_BLOCKER': return `✓ Unblock ${nm} from #${a.blockerId}`;
-    case 'SET_REMINDER': return `⏰ Remind ${nm}: ${a.remindAt}`;
-    case 'SET_RECUR': return a.recur ? `↻ ${a.recur} recurrence on ${nm}` : `✕ Clear recurrence on ${nm}`;
-    default: return op.name + '(...)';
+    case 'UPDATE_TASK': return { kind: 'update' };
+    case 'CREATE_TASK': return { kind: 'simple', title: 'Create task', taskName, detail: parts(['priority','category','dueDate','effort']), icon: 'plus', danger: false };
+    case 'MARK_DONE': return { kind: 'simple', title: 'Mark done', taskName, detail: a.completionNote ? String(a.completionNote).slice(0, 72) : '', icon: 'check', danger: false };
+    case 'REOPEN': return { kind: 'simple', title: 'Reopen', taskName, detail: '', icon: 'rotateCcw', danger: false };
+    case 'TOGGLE_STAR': return { kind: 'simple', title: t?.starred ? 'Unstar' : 'Star', taskName, detail: '', icon: 'star', danger: false };
+    case 'ARCHIVE_TASK': return { kind: 'simple', title: 'Archive', taskName, detail: '', icon: 'archive', danger: false };
+    case 'RESTORE_TASK': return { kind: 'simple', title: 'Restore', taskName, detail: '', icon: 'refresh', danger: false };
+    case 'DELETE_TASK': return { kind: 'simple', title: 'Delete forever', taskName, detail: 'Permanent removal (task must be archived)', icon: 'alertTriangle', danger: true };
+    case 'DUPLICATE_TASK': return { kind: 'simple', title: 'Duplicate', taskName, detail: '', icon: 'copy', danger: false };
+    case 'MOVE_TASK': return { kind: 'simple', title: 'Move in tree', taskName, detail: 'Parent #' + (a.newParentId || 'top'), icon: 'chevronRight', danger: false };
+    case 'CHANGE_LIST': {
+      const l = typeof lists !== 'undefined' ? lists.find(x => x.id === a.listId) : null;
+      return { kind: 'simple', title: 'Move to list', taskName, detail: l ? l.name : ('List #' + a.listId), icon: 'folder', danger: false };
+    }
+    case 'ADD_NOTE': return { kind: 'simple', title: 'Add note', taskName, detail: String(a.text || '').slice(0, 72), icon: 'clipboard', danger: false };
+    case 'ADD_CHECKLIST': return { kind: 'simple', title: 'Add checklist item', taskName, detail: String(a.text || '').slice(0, 72), icon: 'list', danger: false };
+    case 'TOGGLE_CHECK': return { kind: 'simple', title: 'Toggle checklist item', taskName, detail: 'Item #' + a.checkId, icon: 'check', danger: false };
+    case 'REMOVE_CHECK': return { kind: 'simple', title: 'Remove checklist item', taskName, detail: 'Item #' + a.checkId, icon: 'close', danger: false };
+    case 'ADD_TAG': return { kind: 'simple', title: 'Add tag', taskName, detail: String(a.tag || ''), icon: 'plus', danger: false };
+    case 'REMOVE_TAG': return { kind: 'simple', title: 'Remove tag', taskName, detail: String(a.tag || ''), icon: 'close', danger: false };
+    case 'ADD_BLOCKER': {
+      const b = findTask(a.blockerId);
+      return { kind: 'simple', title: 'Add blocker', taskName, detail: b ? b.name.slice(0, 48) : ('#' + a.blockerId), icon: 'alertTriangle', danger: false };
+    }
+    case 'REMOVE_BLOCKER': return { kind: 'simple', title: 'Remove blocker', taskName, detail: 'Blocker #' + a.blockerId, icon: 'close', danger: false };
+    case 'SET_REMINDER': return { kind: 'simple', title: 'Set reminder', taskName, detail: String(a.remindAt || ''), icon: 'timer', danger: false };
+    case 'SET_RECUR': return { kind: 'simple', title: a.recur ? 'Set recurrence' : 'Clear recurrence', taskName, detail: a.recur ? String(a.recur) : '', icon: 'refresh', danger: false };
+    default: return { kind: 'simple', title: op.name, taskName, detail: '', icon: 'gear', danger: false };
   }
 }
-function _flds(a, keys){
-  const p = keys.filter(k => a[k] != null).map(k => `${k}=${a[k]}`);
-  return p.length ? ` [${p.join(', ')}]` : '';
+
+function _renderPendingSimpleCard(op, idx){
+  const st = _describeOpStructured(op);
+  if(st.kind === 'update') return '';
+  const ic = st.icon ? _pendingIcon(st.icon) : '';
+  return `<div class="pending-simple-card${st.danger ? ' pending-simple-card--danger' : ''}">
+    <label class="pending-simple-row">
+      <input type="checkbox" class="pending-op-master" data-op-idx="${idx}" checked>
+      <span class="pending-simple-ic-wrap" aria-hidden="true">${ic}</span>
+      <span class="pending-simple-text">
+        <span class="pending-simple-title">${esc(st.title)}</span>
+        ${st.taskName ? `<span class="pending-simple-target">"${esc(st.taskName)}"</span>` : ''}
+        ${st.detail ? `<span class="pending-simple-detail">${esc(st.detail)}</span>` : ''}
+      </span>
+    </label>
+  </div>`;
 }
-function _chgs(t, a){
-  if(!t) return ' (task not found)';
-  const skip = new Set(['id']);
-  const d = [];
-  Object.entries(a).forEach(([k, v]) => {
-    if(skip.has(k)) return;
-    const o = t[k];
-    if(o !== v){
-      const os = o == null ? '∅' : String(o).slice(0, 40);
-      const ns = v == null ? '∅' : String(v).slice(0, 40);
-      d.push(`${k}: ${os}→${ns}`);
+
+function _renderPendingUpdateCard(op, idx){
+  const t = findTask(op.args.id);
+  const nm = t ? t.name.slice(0, 56) : ('Task #' + op.args.id);
+  const changes = _updateTaskFieldChanges(t, op.args, op._fieldConfidence);
+  if(!changes.length) return '';
+  const rows = changes.map(ch => {
+    if(ch.field === '_missing'){
+      return `<div class="pending-change-row pending-change-row--warn">
+        <span class="pending-field-lbl">Issue</span>
+        <span class="pending-field-val">${esc(ch.note || '')}</span>
+      </div>`;
     }
-  });
-  return d.length ? ' — ' + d.join(', ') : ' (no change)';
+    const fromDisp = esc(_formatFieldDisplay(ch.field, ch.fromVal));
+    const toDisp = esc(_formatFieldDisplay(ch.field, ch.toVal));
+    const pill = _pendingConfPill(ch.confidence);
+    const tip = ch.note ? esc(ch.note) : '';
+    return `<label class="pending-change-row" ${tip ? `title="${tip}"` : ''}>
+      <input type="checkbox" class="pending-field-check" data-op-idx="${idx}" data-field="${esc(ch.field)}" checked>
+      <span class="pending-field-lbl">${esc(_humanizeFieldKey(ch.field))}</span>
+      <span class="pending-field-vals"><span class="pending-field-val pending-field-from">${fromDisp}</span>
+      <span class="pending-field-arrow" aria-hidden="true">→</span>
+      <span class="pending-field-val pending-field-to">${toDisp}</span></span>
+      ${pill}
+    </label>`;
+  }).join('');
+  return `<div class="pending-task-card">
+    <div class="pending-card-head">
+      <label class="pending-card-head-lbl">
+        <input type="checkbox" class="pending-op-master" data-op-idx="${idx}" checked>
+        <span class="pending-card-title">${esc(nm)}</span>
+      </label>
+      <span class="pending-card-badge">${changes.length} field update${changes.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="pending-change-list">${rows}</div>
+  </div>`;
 }
 
 function _pushUndo(label, snaps){
@@ -349,7 +490,7 @@ function aiUndo(){
   saveState('user');
   if(typeof renderTaskList === 'function') renderTaskList();
   _renderUndoBtn();
-  _setIntelStatus('ready', `↩ Reverted ${flat.length} change${flat.length !== 1 ? 's' : ''}`);
+  _setIntelStatus('ready', `Reverted ${flat.length} change${flat.length !== 1 ? 's' : ''}`);
 }
 
 function _intelIc(paths){
@@ -378,31 +519,53 @@ function _renderPendingOps(){
   if(!wrap) return;
   if(!_pendingOps.length){ wrap.innerHTML = ''; wrap.style.display = 'none'; return; }
   wrap.style.display = '';
-  const rows = _pendingOps.map((op, i) => {
-    const desc = _describeOp(op);
-    const danger = op.name === 'DELETE_TASK';
-    return `<label class="pending-op-row ${danger ? 'pending-danger' : ''}">
-      <input type="checkbox" class="pending-op-check" data-idx="${i}" checked>
-      <span class="pending-op-desc">${esc(desc)}</span>
-    </label>`;
-  }).join('');
+
+  const normalParts = [];
+  const dangerIdx = [];
+  _pendingOps.forEach((op, i) => {
+    if(op.name === 'DELETE_TASK') dangerIdx.push(i);
+    else if(op.name === 'UPDATE_TASK') normalParts.push(_renderPendingUpdateCard(op, i));
+    else normalParts.push(_renderPendingSimpleCard(op, i));
+  });
+
+  let dangerHtml = '';
+  if(dangerIdx.length){
+    dangerHtml = `
+    <div class="pending-section-danger">
+      <div class="pending-section-danger-hdr">
+        <span class="pending-section-danger-ic" aria-hidden="true">${_pendingIcon('alertTriangle')}</span>
+        <span class="pending-section-danger-title">Destructive actions</span>
+      </div>
+      <p class="pending-section-danger-copy">Permanent delete cannot be undone. Confirm to enable applying those rows.</p>
+      <label class="pending-danger-ack-lbl">
+        <input type="checkbox" id="pendingDangerAck" autocomplete="off">
+        <span>I understand — allow permanent delete</span>
+      </label>
+      <div class="pending-danger-list">
+        ${dangerIdx.map(i => _renderPendingSimpleCard(_pendingOps[i], i)).join('')}
+      </div>
+    </div>`;
+  }
+
   wrap.innerHTML = `
     <div class="pending-hdr">
-      <span class="pending-title">Proposed Changes (${_pendingOps.length})</span>
-      <button class="pending-toggle-all" onclick="intelToggleAllPending()">Toggle all</button>
+      <span class="pending-title">Proposed changes (${_pendingOps.length})</span>
+      <button type="button" class="pending-toggle-all" onclick="intelToggleAllPending()">Toggle all</button>
     </div>
-    <div class="pending-list">${rows}</div>
+    <div class="pending-list">${normalParts.join('')}</div>
+    ${dangerHtml}
     <div class="pending-actions">
-      <button class="btn-ghost btn-sm" onclick="intelRejectPending()">✕ Reject All</button>
-      <button class="btn-primary" onclick="intelApplyPending()">✓ Apply Selected</button>
+      <button type="button" class="btn-ghost btn-sm" onclick="intelRejectPending()">Reject all</button>
+      <button type="button" class="btn-primary" onclick="intelApplyPending()">Apply selected</button>
     </div>`;
   _setIntelStatus('idle', 'Review proposed changes below');
 }
 
 function intelToggleAllPending(){
-  const cs = document.querySelectorAll('#intelPendingOps .pending-op-check');
-  const all = [...cs].every(c => c.checked);
-  cs.forEach(c => { c.checked = !all; });
+  const masters = document.querySelectorAll('#intelPendingOps .pending-op-master');
+  if(!masters.length) return;
+  const allOn = [...masters].every(c => c.checked);
+  masters.forEach(c => { c.checked = !allOn; });
 }
 
 function intelRejectPending(){
@@ -412,14 +575,44 @@ function intelRejectPending(){
 }
 
 function intelApplyPending(){
-  const cs = [...document.querySelectorAll('#intelPendingOps .pending-op-check')];
-  const sel = cs.filter(c => c.checked).map(c => _pendingOps[parseInt(c.dataset.idx, 10)]);
-  if(!sel.length){ intelRejectPending(); return; }
+  const hasDelete = _pendingOps.some(o => o.name === 'DELETE_TASK');
+  const dangerAck = document.getElementById('pendingDangerAck');
+  if(hasDelete && (!dangerAck || !dangerAck.checked)){
+    _setIntelStatus('error', 'Confirm permanent delete below');
+    return;
+  }
+
+  const selOps = [];
+  for(let idx = 0; idx < _pendingOps.length; idx++){
+    const master = document.querySelector('#intelPendingOps .pending-op-master[data-op-idx="' + idx + '"]');
+    if(!master || !master.checked) continue;
+    const op = _pendingOps[idx];
+
+    if(op.name !== 'UPDATE_TASK'){
+      selOps.push({ name: op.name, args: { ...op.args } });
+      continue;
+    }
+
+    const nextArgs = { id: op.args.id };
+    document.querySelectorAll('#intelPendingOps .pending-field-check[data-op-idx="' + idx + '"]').forEach(fc => {
+      if(!fc.checked) return;
+      const f = fc.getAttribute('data-field');
+      if(!f || f === '_missing') return;
+      if(op.args[f] !== undefined) nextArgs[f] = op.args[f];
+    });
+    if(nextArgs.valuesAlignment !== undefined && op.args.valuesNote){
+      nextArgs.valuesNote = op.args.valuesNote;
+    }
+    if(Object.keys(nextArgs).length <= 1) continue;
+    selOps.push({ name: 'UPDATE_TASK', args: nextArgs });
+  }
+
+  if(!selOps.length){ intelRejectPending(); return; }
 
   const snaps = [];
   let applied = 0;
   const failures = [];
-  sel.forEach(op => {
+  selOps.forEach(op => {
     try{
       const s = executeIntelOp(op);
       if(s){ snaps.push(s); applied++; }
@@ -462,7 +655,7 @@ function intelApplyPending(){
 
   _pendingOps = [];
   _renderPendingOps();
-  _setIntelStatus('ready', failures.length ? `Applied ${applied}, ${failures.length} failed` : `✓ Applied ${applied}`);
+  _setIntelStatus('ready', failures.length ? `Applied ${applied}, ${failures.length} failed` : `Applied ${applied}`);
 }
 
 function _setIntelStateClass(el, state){
@@ -827,7 +1020,7 @@ async function intelHarmonizeFields(){
     }
     _pendingOps = ops;
     _renderPendingOps();
-    _setIntelStatus('ready', `Review ${ops.length} proposed field update${ops.length === 1 ? '' : 's'}`);
+    _setIntelStatus('ready', `Review ${ops.length} proposed update${ops.length === 1 ? '' : 's'}`);
   }catch(err){
     console.warn('[harmonize]', err);
     _setIntelStatus('error', 'Harmonize failed');
@@ -924,7 +1117,12 @@ async function smartAddEnhance(){
   if(!raw || raw.length < 3) return;
 
   _intelBusy = true;
-  if(btn){ btn.disabled = true; btn.textContent = '⚙'; }
+  if(btn){
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.dataset.prevHtml = btn.innerHTML;
+    btn.innerHTML = (window.icon && window.icon('harmonize', { size: 14, cls: 'is-spin' })) || '';
+  }
 
   try{
     const sugg = await predictMetadata(raw, 5);
@@ -954,7 +1152,16 @@ async function smartAddEnhance(){
     console.warn('[smart-add]', err);
   }finally{
     _intelBusy = false;
-    if(btn){ btn.disabled = false; btn.innerHTML = (window.icon && window.icon('sparkles')) || ''; }
+    if(btn){
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      if(btn.dataset.prevHtml != null){
+        btn.innerHTML = btn.dataset.prevHtml;
+        delete btn.dataset.prevHtml;
+      } else {
+        btn.innerHTML = (window.icon && window.icon('sparkles')) || '';
+      }
+    }
   }
 }
 

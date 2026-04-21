@@ -280,45 +280,98 @@ async function ensureSchwartzEmbeddings(){
   return vecs;
 }
 
+/** kNN neighborhood + vote quality (tuneable) */
+const KNN_MIN_SIM = 0.55;
+const KNN_CAT_MIN_CONF = 0.55;
+const KNN_CAT_MIN_MARGIN = 0.15;
+const KNN_CTX_MIN_CONF = 0.55;
+const KNN_CTX_MIN_MARGIN = 0.15;
+const KNN_PRIO_EFF_EN_MIN_CONF = 0.5;
+const KNN_TAG_TOP_FRAC = 0.6;
+
+function _weightedFieldVote(topNeighbors, field){
+  const w = new Map();
+  let total = 0;
+  for(const { t, sim } of topNeighbors){
+    const v = t[field];
+    if(v == null || v === '') continue;
+    w.set(v, (w.get(v) || 0) + sim);
+    total += sim;
+  }
+  if(!w.size || total <= 0) return { value: null, confidence: 0, margin: 0, totalWeight: 0 };
+  const sorted = [...w.entries()].sort((a, b) => b[1] - a[1]);
+  const [v0, w0] = sorted[0];
+  const w1 = sorted[1] ? sorted[1][1] : 0;
+  const confidence = w0 / total;
+  const margin = w0 > 0 ? (w0 - w1) / w0 : 0;
+  return { value: v0, confidence, margin, totalWeight: w0 };
+}
+
 /**
- * kNN vote from embedding store
+ * kNN metadata from a precomputed query vector (no embedText call).
+ * @param {Float32Array} queryVec
+ * @param {{ store: Map<number,{vec:Float32Array,textHash:string}>, excludeId?: number|null, heuristic?: object, k?: number }} opts
  */
-async function predictMetadata(taskName, k){
-  const kk = k || 5;
-  const q = await embedText(taskName);
-  const store = await embedStore.all();
+function predictMetadataFromVec(queryVec, opts){
+  const o = opts || {};
+  const store = o.store;
+  const excludeId = o.excludeId == null ? null : o.excludeId;
+  const kk = o.k || 5;
+  const heuristic = (o.heuristic && typeof o.heuristic === 'object') ? { ...o.heuristic } : {};
+  const merged = { ...heuristic };
+  const _confidence = {};
+
+  if(!store || !queryVec){
+    merged._confidence = _confidence;
+    return merged;
+  }
+
   const scored = [];
   for(const [id, rec] of store){
+    if(id === excludeId) continue;
     const t = typeof findTask === 'function' ? findTask(id) : null;
     if(!t || t.archived) continue;
-    scored.push({ t, sim: cosine(q, rec.vec) });
+    scored.push({ t, sim: cosine(queryVec, rec.vec) });
   }
   scored.sort((a, b) => b.sim - a.sim);
-  const top = scored.slice(0, kk).filter(x => x.sim > 0.55);
-  const merged = _heuristicMetadata(taskName);
-  if(!top.length) return merged;
+  const top = scored.slice(0, kk).filter(x => x.sim > KNN_MIN_SIM);
+  if(!top.length){
+    merged._confidence = _confidence;
+    return merged;
+  }
 
-  const vote = field => {
-    const w = new Map();
-    for(const { t, sim } of top){
-      const v = t[field];
-      if(v == null || v === '') continue;
-      w.set(v, (w.get(v) || 0) + sim);
-    }
-    if(!w.size) return null;
-    return [...w.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const pickDiscrete = (field, minConf, minMargin, validator) => {
+    const { value, confidence, margin } = _weightedFieldVote(top, field);
+    _confidence[field] = { value, confidence, margin };
+    if(value == null) return null;
+    if(confidence < minConf || margin < minMargin) return null;
+    if(typeof validator === 'function' && !validator(value)) return null;
+    return value;
   };
 
-  const cat = vote('category');
-  const pr = vote('priority');
-  const eff = vote('effort');
-  const ctx = vote('context');
-  const en = vote('energyLevel');
-  if(cat && hasClassificationCategory(cat)) merged.category = cat;
-  if(pr && ['urgent','high','normal','low'].includes(pr)) merged.priority = pr;
-  if(eff && ['xs','s','m','l','xl'].includes(eff)) merged.effort = eff;
-  if(ctx && hasClassificationContext(ctx)) merged.context = ctx;
-  if(en && ['high','low'].includes(en)) merged.energyLevel = en;
+  const cat = pickDiscrete('category', KNN_CAT_MIN_CONF, KNN_CAT_MIN_MARGIN, v => hasClassificationCategory(v));
+  if(cat) merged.category = cat;
+
+  const ctx = pickDiscrete('context', KNN_CTX_MIN_CONF, KNN_CTX_MIN_MARGIN, v => hasClassificationContext(v));
+  if(ctx) merged.context = ctx;
+
+  const prVote = _weightedFieldVote(top, 'priority');
+  _confidence.priority = { value: prVote.value, confidence: prVote.confidence, margin: prVote.margin };
+  if(prVote.value && ['urgent','high','normal','low'].includes(prVote.value) && prVote.confidence >= KNN_PRIO_EFF_EN_MIN_CONF){
+    merged.priority = prVote.value;
+  }
+
+  const effVote = _weightedFieldVote(top, 'effort');
+  _confidence.effort = { value: effVote.value, confidence: effVote.confidence, margin: effVote.margin };
+  if(effVote.value && ['xs','s','m','l','xl'].includes(effVote.value) && effVote.confidence >= KNN_PRIO_EFF_EN_MIN_CONF){
+    merged.effort = effVote.value;
+  }
+
+  const enVote = _weightedFieldVote(top, 'energyLevel');
+  _confidence.energyLevel = { value: enVote.value, confidence: enVote.confidence, margin: enVote.margin };
+  if(enVote.value && ['high','low'].includes(enVote.value) && enVote.confidence >= KNN_PRIO_EFF_EN_MIN_CONF){
+    merged.energyLevel = enVote.value;
+  }
 
   const tagCounts = new Map();
   for(const { t, sim } of top){
@@ -327,10 +380,33 @@ async function predictMetadata(taskName, k){
       tagCounts.set(tag, (tagCounts.get(tag) || 0) + sim);
     });
   }
-  const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0]);
+  const tagSorted = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]);
+  let tags = [];
+  if(tagSorted.length){
+    const topW = tagSorted[0][1];
+    const floor = topW * KNN_TAG_TOP_FRAC;
+    tags = tagSorted.filter(([, w]) => w >= floor).slice(0, 5).map(x => x[0]);
+    _confidence.tags = { topWeight: topW, picked: tags.slice() };
+  }
   if(tags.length) merged.tags = tags;
 
+  merged._confidence = _confidence;
   return merged;
+}
+
+/**
+ * kNN vote from embedding store (embeds query text once).
+ */
+async function predictMetadata(taskName, k){
+  const kk = k || 5;
+  const q = await embedText(taskName);
+  const store = await embedStore.all();
+  return predictMetadataFromVec(q, {
+    store,
+    excludeId: null,
+    heuristic: _heuristicMetadata(taskName),
+    k: kk,
+  });
 }
 
 async function semanticSearch(query, limit){
@@ -389,6 +465,16 @@ async function computeDuplicateScores(){
   return maxSim;
 }
 
+function alignValuesFromVec(vec, schwartzVecs){
+  if(!vec || !schwartzVecs) return [];
+  const ranked = Object.entries(schwartzVecs)
+    .map(([name, v]) => ({ name, sim: cosine(vec, v) }))
+    .sort((a, b) => b.sim - a.sim)
+    .filter(x => x.sim > 0.35)
+    .slice(0, 3);
+  return ranked.map(x => x.name);
+}
+
 async function alignValuesForTask(taskId){
   const t = typeof findTask === 'function' ? findTask(taskId) : null;
   if(!t) return [];
@@ -400,12 +486,7 @@ async function alignValuesForTask(taskId){
   if(got && got.vec) vec = got.vec;
   else vec = await embedText(_taskText(t));
 
-  const ranked = Object.entries(schwartzVecs)
-    .map(([name, v]) => ({ name, sim: cosine(vec, v) }))
-    .sort((a, b) => b.sim - a.sim)
-    .filter(x => x.sim > 0.35)
-    .slice(0, 3);
-  return ranked.map(x => x.name);
+  return alignValuesFromVec(vec, schwartzVecs);
 }
 
 function isTaskBlocked(t){
@@ -583,13 +664,6 @@ function _stableSortedJson(arr){
   return JSON.stringify([...(arr || [])].map(String).sort());
 }
 
-/** Name + description line for kNN metadata (matches embed text roughly) */
-function _predictQueryLine(t){
-  const n = (t.name || '').trim();
-  const d = (t.description || '').trim().slice(0, 600);
-  return d ? `${n}\n${d}` : n;
-}
-
 /**
  * Build UPDATE_TASK ops from embeddings: Schwartz-style values + kNN metadata
  * (category, priority, effort, context, energy, tags) where they differ from current.
@@ -603,19 +677,32 @@ async function proposeHarmonizeUpdates(opts){
   const maxTasks = o.maxTasks == null ? 200 : o.maxTasks;
   if(typeof tasks === 'undefined' || !Array.isArray(tasks)) return [];
 
-  await ensureSchwartzEmbeddings();
+  const schwartzVecs = await ensureSchwartzEmbeddings();
 
   const active = tasks.filter(t => t && !t.archived && t.status !== 'done').slice(0, maxTasks);
   const ops = [];
 
-  for(const t of active){
-    if(typeof embedStore !== 'undefined' && embedStore.ensure){
+  if(typeof embedStore !== 'undefined' && embedStore.ensure){
+    for(const t of active){
       try{ await embedStore.ensure(t); }catch(e){ /* skip */ }
     }
+  }
+  const store = await embedStore.all();
 
-    const line = _predictQueryLine(t);
-    const meta = await predictMetadata(line, 7);
-    const valsRaw = await alignValuesForTask(t.id);
+  for(const t of active){
+    const rec = store.get(t.id);
+    if(!rec || !rec.vec) continue;
+
+    const meta = predictMetadataFromVec(rec.vec, {
+      store,
+      excludeId: t.id,
+      heuristic: _heuristicMetadata((t.name || '').trim()),
+      k: 7,
+    });
+    const fieldConfidence = meta._confidence || null;
+    if(meta._confidence) delete meta._confidence;
+
+    const valsRaw = schwartzVecs ? alignValuesFromVec(rec.vec, schwartzVecs) : [];
     const useVals = dominant.length
       ? valsRaw.filter(v => dominant.includes(v))
       : valsRaw.slice(0, 3);
@@ -671,7 +758,11 @@ async function proposeHarmonizeUpdates(opts){
       }
     }
 
-    if(changes) ops.push({ name: 'UPDATE_TASK', args });
+    if(changes){
+      const op = { name: 'UPDATE_TASK', args };
+      if(fieldConfidence) op._fieldConfidence = fieldConfidence;
+      ops.push(op);
+    }
   }
 
   return ops;
@@ -699,6 +790,8 @@ async function similarTasksFor(taskId, k){
 }
 
 window.ensureSchwartzEmbeddings = ensureSchwartzEmbeddings;
+window.predictMetadataFromVec = predictMetadataFromVec;
+window.alignValuesFromVec = alignValuesFromVec;
 window.predictMetadata = predictMetadata;
 window.semanticSearch = semanticSearch;
 window.findDuplicates = findDuplicates;

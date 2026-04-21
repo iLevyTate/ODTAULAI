@@ -1,5 +1,5 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 const APP_BUILD_DATE = '2026-04-20';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
