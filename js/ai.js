@@ -1379,9 +1379,11 @@ function renderGenSettings(){
 
   const preset = presets.find(p => p.id === cfg.modelId) || presets[0];
   const sizeMb = preset ? preset.sizeMb : 230;
+  const lastErr = typeof getGenLastError === 'function' ? getGenLastError() : null;
 
   const statusText = ready ? `Ready · ${dev || 'CPU'} · ${preset ? preset.label : cfg.modelId}`
     : loading ? 'Loading…'
+    : lastErr ? 'Load failed'
     : cfg.downloaded ? 'Cached (click Load to use)'
     : 'Not downloaded';
 
@@ -1408,6 +1410,7 @@ function renderGenSettings(){
         <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" onchange="setGenTimeout(this.value)" ${cfg.enabled ? '' : 'disabled'}>
       </div>
       <div class="gen-settings-status" id="genSettingsStatus">${esc(statusText)}</div>
+      ${lastErr ? `<div class="gen-settings-warn" role="alert">${esc(lastErr)}</div>` : ''}
       <div id="genProgressWrap" class="intel-progress-wrap" style="display:none">
         <div class="intel-progress-track"><div class="intel-progress-bar" id="genProgressBar" style="width:0%"></div></div>
         <div class="intel-progress-info"><span id="genProgressPct">0%</span> <span id="genProgressTxt"></span></div>
@@ -1441,6 +1444,7 @@ function selectGenModel(id){
   cfg.dtype = p.dtype;
   cfg.downloaded = false;
   saveGenCfg(cfg);
+  if(typeof clearGenLastError === 'function') clearGenLastError();
   renderGenSettings();
 }
 
@@ -1456,6 +1460,7 @@ async function genDownloadClick(){
   if(typeof genLoad !== 'function') return;
   const cfg = getGenCfg();
   if(!cfg.enabled){ cfg.enabled = true; saveGenCfg(cfg); }
+  if(typeof clearGenLastError === 'function') clearGenLastError();
   const btn = document.getElementById('genDownloadBtn');
   const wrap = document.getElementById('genProgressWrap');
   const bar = document.getElementById('genProgressBar');

@@ -9,11 +9,18 @@ const GEN_TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transfor
 const GEN_CFG_KEY = 'stupind_gen_cfg';
 const GEN_HIST_KEY = 'stupind_gen_history';
 
+// Published instruct-tuned models with ONNX weights in each repo's onnx/
+// subfolder. Verified HF slugs (Xenova/* does NOT host SmolLM2 — use the
+// HuggingFaceTB originals and onnx-community repacks).
 const GEN_MODEL_PRESETS = [
-  { id:'Xenova/SmolLM2-360M-Instruct', dtype:'q4',    sizeMb:230, label:'SmolLM2 360M (balanced)', note:'Recommended for most devices' },
-  { id:'Xenova/SmolLM2-135M-Instruct', dtype:'q4',    sizeMb:100, label:'SmolLM2 135M (tiny)',     note:'Lowest RAM — older phones' },
-  { id:'Xenova/Qwen2.5-0.5B-Instruct', dtype:'q4',    sizeMb:320, label:'Qwen2.5 0.5B (bigger)',   note:'Desktop / WebGPU preferred' },
+  { id:'HuggingFaceTB/SmolLM2-360M-Instruct', dtype:'q4', sizeMb:230, label:'SmolLM2 360M (balanced)', note:'Recommended for most devices' },
+  { id:'HuggingFaceTB/SmolLM2-135M-Instruct', dtype:'q4', sizeMb:100, label:'SmolLM2 135M (tiny)',     note:'Lowest RAM — older phones' },
+  { id:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q4', sizeMb:320, label:'Qwen2.5 0.5B (bigger)',   note:'Desktop / WebGPU preferred' },
 ];
+
+// Any pre-v27 config that points at the stale Xenova/* slugs gets reset to
+// the current default preset. Keeps existing users from hitting a 401.
+const GEN_CFG_VERSION = 2;
 
 let _genPipe = null;
 let _genReady = false;
@@ -22,11 +29,14 @@ let _genDevice = null;
 let _genModelId = null;
 let _genLoadPromise = null;
 let _genAbortCtl = null;
+let _genLastError = null;
 
 function getGenDevice(){ return _genDevice; }
 function getGenModel(){ return _genModelId; }
 function isGenReady(){ return _genReady; }
 function isGenLoading(){ return _genLoading; }
+function getGenLastError(){ return _genLastError; }
+function clearGenLastError(){ _genLastError = null; }
 
 function _loadGenCfg(){
   let cfg = {};
@@ -37,6 +47,16 @@ function _loadGenCfg(){
   if(!cfg.dtype)  cfg.dtype  = GEN_MODEL_PRESETS[0].dtype;
   if(typeof cfg.timeoutSec !== 'number') cfg.timeoutSec = _defaultTimeoutSec();
   if(typeof cfg.downloaded !== 'boolean') cfg.downloaded = false;
+  // Migrate: old builds wrote Xenova/SmolLM2-* ids that don't exist on HF.
+  // Also fall forward to the current default if the stored id isn't in the
+  // preset list so users never get stuck on a stale slug.
+  const known = GEN_MODEL_PRESETS.some(p => p.id === cfg.modelId);
+  if(!known || cfg.cfgVersion !== GEN_CFG_VERSION){
+    cfg.modelId = GEN_MODEL_PRESETS[0].id;
+    cfg.dtype = GEN_MODEL_PRESETS[0].dtype;
+    cfg.downloaded = false;
+    cfg.cfgVersion = GEN_CFG_VERSION;
+  }
   return cfg;
 }
 
@@ -86,6 +106,7 @@ async function genLoad(modelId, dtype, onProgress){
 
   _genLoading = true;
   _genModelId = modelId;
+  _genLastError = null;
 
   const cb = typeof onProgress === 'function' ? onProgress : () => {};
 
@@ -98,41 +119,68 @@ async function genLoad(modelId, dtype, onProgress){
     }catch(e){
       _genLoading = false;
       _genLoadPromise = null;
+      _genLastError = 'Failed to load Transformers.js from CDN: ' + (e.message || e);
       throw e;
     }
     env.allowLocalModels = false;
     env.useBrowserCache = true;
 
+    // On WebGPU we prefer q4f16 (int4 weights + fp16 activations) when the
+    // caller's stored dtype is plain q4; on WASM we use q4 (fp16 activations
+    // aren't supported). This mirrors what works across Transformers.js v3.
+    const webgpuDtype = dtype === 'q4' ? 'q4f16' : (dtype || 'q4f16');
+    const wasmDtype   = dtype === 'q4f16' ? 'q4' : (dtype || 'q4');
+
+    let lastErr = null;
     try{
       try{
         _genPipe = await pipeline('text-generation', modelId, {
           device: 'webgpu',
-          dtype: dtype || 'q4f16',
+          dtype: webgpuDtype,
           progress_callback: cb,
         });
         _genDevice = 'webgpu';
       }catch(e){
+        lastErr = e;
         console.warn('[gen] WebGPU pipeline failed, falling back to WASM', e);
         _genPipe = await pipeline('text-generation', modelId, {
           device: 'wasm',
-          dtype: dtype || 'q4',
+          dtype: wasmDtype,
           progress_callback: cb,
         });
         _genDevice = 'wasm';
       }
       _genReady = true;
+      _genLastError = null;
     }catch(e){
       _genPipe = null;
       _genReady = false;
       _genDevice = null;
       _genLoading = false;
       _genLoadPromise = null;
+      const msg = (e && e.message) ? e.message : String(e);
+      _genLastError = _friendlyGenError(msg, modelId);
       throw e;
     }
     _genLoading = false;
+    _genLoadPromise = null;
   })();
 
   return _genLoadPromise;
+}
+
+function _friendlyGenError(msg, modelId){
+  const m = String(msg || '');
+  if(/Unauthorized|403|404|not found/i.test(m)){
+    return `Model "${modelId}" could not be downloaded. The repo may be private, missing, or not published with ONNX weights. Try a different preset. Raw: ${m.slice(0, 120)}`;
+  }
+  if(/NetworkError|Failed to fetch/i.test(m)){
+    return 'Network error while downloading model weights. Check connection and retry.';
+  }
+  if(/out of memory|OOM|Allocation failed/i.test(m)){
+    return 'Device ran out of memory loading the model. Try the smaller Tiny (135M) preset.';
+  }
+  return 'Load failed: ' + m.slice(0, 180);
 }
 
 function genAbort(){
@@ -214,6 +262,8 @@ if(typeof window !== 'undefined'){
   window.isGenLoading = isGenLoading;
   window.getGenDevice = getGenDevice;
   window.getGenModel = getGenModel;
+  window.getGenLastError = getGenLastError;
+  window.clearGenLastError = clearGenLastError;
   window.getAskHistory = getAskHistory;
   window.pushAskHistory = pushAskHistory;
   window._mobileRamHint = _mobileRamHint;
