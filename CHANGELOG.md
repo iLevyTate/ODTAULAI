@@ -1,5 +1,11 @@
 # Changelog
 
+## v29 — 2026-04-21
+
+- Hotfix (critical): the Tools panel and the Generative AI settings section went blank after the v28 release. Root cause: both `js/gen.js` and `js/ai.js` declared `let _genLastError` at the top level, and because classic `<script>` tags share one lexical scope, the second `let` threw `SyntaxError: Identifier '_genLastError' has already been declared`, which silently killed every function defined in `ai.js` (task-understanding panel, `renderGenSettings`, `toggleGenEnabled`, smart-add, promo chip sync, etc.). Renamed the `ai.js` per-model mirror to `_askLoadError`; the authoritative error string still lives in `gen.js` and is surfaced via `getGenLastError()`.
+- Regression guard: new `tests/script-scope.test.mjs` concatenates every `<script src="js/*.js">` in `index.html` load order and parses them in a single lexical scope, so any future duplicate top-level `let`/`const`/`class` across classic scripts fails CI with a message naming the offending identifier.
+- Service worker cache rotated to `odtaulai-v29` so existing v28 installs pick up the fix on next load instead of continuing to serve the broken bundle from cache.
+
 ## v28 — 2026-04-21
 
 - Ask (generative): fix "stuck download" UX — download/cached/loaded state is now honest per-model. Progress bar aggregates bytes across files (no more snap-back when a new file starts), status text updates while downloading, and errors persist inline until the user retries or switches models.
