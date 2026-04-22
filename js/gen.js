@@ -129,7 +129,10 @@ function _saveGenCfg(cfg){
 }
 
 function _defaultTimeoutSec(){
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  // Guarded so Node test harnesses without a navigator shim don't blow up
+  // (the browser always has one).
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
   return isMobile ? 30 : 60;
 }
 
