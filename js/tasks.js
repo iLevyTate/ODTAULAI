@@ -666,8 +666,35 @@ function setSmartView(v){
   smartView=v;
   document.querySelectorAll('.sv-chip').forEach(el=>{el.classList.toggle('active',el.dataset.view===v)});
   const notice=gid('archivedNotice');if(notice)notice.style.display=v==='archived'?'flex':'none';
+  // Sync collapsed/expanded class to the user preference. By default the bar
+  // is collapsed-to-active so the task header stays compact; users can opt
+  // into the always-expanded layout with the `All views ▾` toggle.
+  _applySmartViewsCollapsed(!smartViewsExpanded);
   renderTaskList();saveState('user')
 }
+
+/**
+ * Apply or remove the collapsed-state class to the smart-views bar and sync
+ * the toggle button's aria-expanded attribute. Pure DOM — does not persist.
+ */
+function _applySmartViewsCollapsed(collapsed){
+  const root = gid('smartViews');
+  if(root) root.classList.toggle('smart-views--collapsed', !!collapsed);
+  const toggle = gid('svToggle');
+  if(toggle){
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.title = collapsed ? 'Show all views' : 'Hide other views';
+    const arrow = toggle.querySelector('.sv-toggle-arrow');
+    if(arrow) arrow.textContent = collapsed ? '▾' : '▴';
+  }
+}
+
+function toggleSmartViews(){
+  smartViewsExpanded = !smartViewsExpanded;
+  _applySmartViewsCollapsed(!smartViewsExpanded);
+  if(typeof saveState === 'function') saveState('user');
+}
+window.toggleSmartViews = toggleSmartViews;
 
 // Star toggle
 function toggleStar(id){
