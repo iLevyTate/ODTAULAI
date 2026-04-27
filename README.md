@@ -10,21 +10,11 @@
 
 <img src="icons/icon-512.png" alt="OdTauLai" width="140" height="140" />
 
-<br />
+<h1>OdTauLai</h1>
 
-```
-   ___      _ _____           _              _
-  / _ \  __| |_   _|_ _ _   _| |    __ _   (_)
- | | | |/ _` | | |/ _` | | | | |   / _` |   _
- | |_| | (_| | | | (_| | |_| | |__| (_| |  (_)
-  \___/ \__,_| |_|\__,_|\__,_|_____\__,_|
-```
+<p><strong>On-Device Task App Using Local Ambient Intelligence</strong></p>
 
-### **OdTauLai**
-
-**On-Device Task App Using Local Ambient Intelligence**
-
-*A Pomodoro timer and ClickUp-style task manager that understands what your tasks **mean** — on your device, offline, with no account, no telemetry, no cloud LLM.*
+<p><em>A Pomodoro timer and ClickUp-style task manager that understands what your tasks <strong>mean</strong> — on your device, offline, with no account, no telemetry, no cloud LLM.</em></p>
 
 <br />
 
@@ -241,7 +231,7 @@ A derived impact score ranks every active task from signals you already have —
 ### The 10-second path
 
 ```bash
-git clone https://github.com/<you>/STUPInD.git OdTauLai
+git clone https://github.com/iLevyTate/OdTauLai.git
 cd OdTauLai
 python3 -m http.server 8080
 # open http://localhost:8080
