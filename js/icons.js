@@ -48,6 +48,7 @@
     flame:         '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.3-2.4-.5-4.5 2-6 .6 5.5 5.5 5.2 5.5 10A6 6 0 1 1 6 13c0-1.6.6-2.5 1.5-3.5"/>',
     // Context
     phone:         '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+    mic:           '<path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>',
     monitor:       '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
     car:           '<path d="M5 13l2-6a2 2 0 0 1 2-1h6a2 2 0 0 1 2 1l2 6"/><rect x="3" y="13" width="18" height="5" rx="1"/><circle cx="7" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/>',
     // Actions
