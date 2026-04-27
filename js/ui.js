@@ -324,13 +324,27 @@ function openAskMode(){
   openCmdK({ask:true});
 }
 
-/** Show the task-input promo chip only when the LLM is ready. */
+/** Show the task-input promo chip only when the LLM is ready AND the user
+ * hasn't dismissed/hidden it. Default is hidden — Ask is also reachable via
+ * the Cmd/Ctrl+K palette so promoting it inline is opt-in noise reduction. */
 function syncAskPromoChip(){
   const chip=gid('askPromoChip');
   if(!chip)return;
   const ready=typeof isGenReady==='function'&&isGenReady();
-  chip.style.display=ready?'':'none';
+  const allowed=!(typeof cfg==='object'&&cfg&&cfg.askPromoHidden);
+  chip.style.display=(ready&&allowed)?'':'none';
 }
+/** User-toggle to surface the inline Ask promo. Persists to cfg. */
+function showAskPromo(){
+  if(typeof cfg==='object'&&cfg){cfg.askPromoHidden=false;saveState('user');}
+  syncAskPromoChip();
+}
+function hideAskPromo(){
+  if(typeof cfg==='object'&&cfg){cfg.askPromoHidden=true;saveState('user');}
+  syncAskPromoChip();
+}
+window.showAskPromo=showAskPromo;
+window.hideAskPromo=hideAskPromo;
 function renderCmdK(){
   const rawInput=gid('cmdkInput');
   let rawVal=rawInput?rawInput.value:'';
@@ -507,7 +521,21 @@ function toggleTheme(){
 }
 function applyTheme(){
   document.body.classList.toggle('light-theme',theme==='light');
-  const btn=gid('themeToggleBtn');if(btn)btn.textContent=theme==='dark'?'🌙':'☀';
+  // Theme-toggle glyph: SVG icon via the project icon system (no emoji — the
+  // U+1F319 moon and U+2600 sun glyphs fall back to ✱ on Windows in many
+  // sans-serif stacks, hiding the affordance entirely).
+  const btn=gid('themeToggleBtn');
+  if(btn){
+    const span = btn.querySelector('[data-icon]');
+    if(span){
+      span.setAttribute('data-icon', theme==='dark' ? 'moon' : 'sun');
+      span.textContent = '';
+      span.__iconHydrated = false;
+      if(typeof window.hydrateIcons === 'function') window.hydrateIcons(btn);
+    }else{
+      btn.textContent = theme==='dark' ? '🌙' : '☀';
+    }
+  }
   const meta=document.querySelector('meta[name="theme-color"]');
   if(meta){
     const c=getComputedStyle(document.body).getPropertyValue('--bg-0').trim();
@@ -1026,7 +1054,12 @@ function closeTaskDetail(opts){
     }
   }
   _taskModalSnapshot=null;
-  gid('taskModal').classList.remove('open');
+  const _modalEl=gid('taskModal');
+  _modalEl.classList.remove('open');
+  // Reset any leftover swipe-drag transform from the bottom-sheet gesture so
+  // the next open starts cleanly.
+  const _sheet=_modalEl&&_modalEl.querySelector('.modal');
+  if(_sheet){_sheet.style.transform='';_sheet.style.transition=''}
   if(!skipRevert) renderTaskList();
   editingTaskId=null;
   document.removeEventListener('keydown',_taskModalTabTrap,true);
@@ -1034,6 +1067,54 @@ function closeTaskDetail(opts){
   _taskModalPrevFocus=null;
   if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
 }
+
+// ── Bottom-sheet swipe-to-dismiss ──────────────────────────────────────────
+// On mobile (<640px) the .modal renders as a bottom sheet. Swipe down on the
+// sheet header to dismiss — matches iOS / Android conventions. Header-only so
+// scrolling the body doesn't accidentally trigger a dismiss.
+function _initTaskModalSwipeDismiss(){
+  const overlay=gid('taskModal');
+  if(!overlay||overlay.dataset.swipeBound==='1') return;
+  const sheet=overlay.querySelector('.modal');
+  const head=overlay.querySelector('.modal-head');
+  if(!sheet||!head) return;
+  let startY=null,deltaY=0,active=false;
+  const isSheetMode=()=>matchMedia('(max-width:640px)').matches;
+  const onStart=(e)=>{
+    if(!isSheetMode()) return;
+    const t=e.touches?e.touches[0]:e;
+    startY=t.clientY;deltaY=0;active=true;
+    sheet.style.transition='none';
+  };
+  const onMove=(e)=>{
+    if(!active||startY==null) return;
+    const t=e.touches?e.touches[0]:e;
+    const dy=t.clientY-startY;
+    if(dy<0){deltaY=0;sheet.style.transform='';return}
+    deltaY=dy;
+    sheet.style.transform='translateY('+dy+'px)';
+    if(e.cancelable) e.preventDefault();
+  };
+  const onEnd=()=>{
+    if(!active) return;
+    active=false;
+    sheet.style.transition='transform .2s ease-out';
+    if(deltaY>120){
+      // Animate to fully off-screen, then close (close also resets transform).
+      sheet.style.transform='translateY(110%)';
+      setTimeout(()=>closeTaskDetail(),180);
+    }else{
+      sheet.style.transform='';
+    }
+    startY=null;deltaY=0;
+  };
+  head.addEventListener('touchstart',onStart,{passive:true});
+  head.addEventListener('touchmove',onMove,{passive:false});
+  head.addEventListener('touchend',onEnd,{passive:true});
+  head.addEventListener('touchcancel',onEnd,{passive:true});
+  overlay.dataset.swipeBound='1';
+}
+window._initTaskModalSwipeDismiss=_initTaskModalSwipeDismiss;
 function saveTaskDetail(){
   if(!editingTaskId)return;
   const t=findTask(editingTaskId);if(!t)return;

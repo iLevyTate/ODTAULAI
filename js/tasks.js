@@ -221,10 +221,15 @@ async function addTask(){
     props = p.props;
   }
   if(!name){ name = raw; props = {}; }
+  // Merge in any explicit field values the user set via the configurable
+  // "More options" panel. Quick-add tokens in `props` take precedence so
+  // typing "@urgent" still wins over a panel-set priority — explicit text
+  // input is the most recent intent.
+  const panelVals=(typeof window!=='undefined'&&window._quickAddValues)?window._quickAddValues:null;
   const _newT=Object.assign({
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId:null,collapsed:false
-  },defaultTaskProps(),props);
+  },defaultTaskProps(),panelVals||{},props);
   tasks.push(_newT);
   _taskIndexRegister(_newT);
   inp.value='';
@@ -240,6 +245,12 @@ async function addTask(){
     if(cfg.qaHintTaskCount>=3) cfg.qaHintHidden=true;
   }
   if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
+  // Reset configurable quick-add panel selections once the task lands so the
+  // next one starts blank. Panel stays open so a brain-dump session can keep
+  // reusing the same field set if desired — but the user re-applies values
+  // explicitly each time.
+  if(typeof window!=='undefined'){window._quickAddValues=null}
+  if(typeof renderQuickAddPanel==='function') renderQuickAddPanel();
   // Hint to renderTaskItem: animate this card on the upcoming render and
   // scroll it into view. The flag self-clears in the renderer.
   window._lastAddedTaskId=_newT.id;
@@ -2026,3 +2037,253 @@ window.getHabitLoggedSecTotal = getHabitLoggedSecTotal;
 window.dismissSwipeTip = dismissSwipeTip;
 window.snoozeTodayBanner = snoozeTodayBanner;
 window.clearTaskSearch = clearTaskSearch;
+
+// ─── Configurable quick-add panel ──────────────────────────────────────────
+// Inline panel beneath the task input. Field set is user-configurable in
+// Settings → Quick-add fields. Default fields: list + due. Each field's
+// chosen value is staged in window._quickAddValues until the user submits.
+const QUICK_ADD_FIELDS = {
+  list: { label: 'List', render: _renderQAList },
+  due:  { label: 'Due date', render: _renderQADue },
+  category: { label: 'Life area', render: _renderQACategory },
+  priority: { label: 'Priority', render: _renderQAPriority },
+  type: { label: 'Type', render: _renderQAType },
+  recur: { label: 'Repeats', render: _renderQARecur },
+  star: { label: 'Star', render: _renderQAStar },
+  tags: { label: 'Tags', render: _renderQATags },
+};
+
+function _qaVal(){ return (window._quickAddValues = window._quickAddValues || {}); }
+function _qaSet(key, val){
+  const v = _qaVal();
+  if(val == null || val === '' || (Array.isArray(val) && !val.length)) delete v[key];
+  else v[key] = val;
+}
+
+function _renderQAList(wrap){
+  wrap.appendChild(_qaLbl('List'));
+  const ctl = document.createElement('div');
+  ctl.className = 'qa-more-field-control';
+  const sel = document.createElement('select');
+  sel.className = 'mfield-in';
+  sel.style.maxWidth = '100%';
+  const optDefault = document.createElement('option');
+  optDefault.value = ''; optDefault.textContent = '— default —';
+  sel.appendChild(optDefault);
+  if(typeof lists !== 'undefined' && Array.isArray(lists)){
+    lists.forEach(L => {
+      const o = document.createElement('option');
+      o.value = String(L.id); o.textContent = L.name;
+      sel.appendChild(o);
+    });
+  }
+  if(_qaVal().listId != null) sel.value = String(_qaVal().listId);
+  sel.onchange = () => _qaSet('listId', sel.value ? parseInt(sel.value,10) : null);
+  ctl.appendChild(sel);
+  wrap.appendChild(ctl);
+}
+
+function _renderQADue(wrap){
+  wrap.appendChild(_qaLbl('Due date'));
+  const ctl = document.createElement('div');
+  ctl.className = 'qa-more-field-control';
+  const inp = document.createElement('input');
+  inp.type = 'date'; inp.className = 'mfield-in';
+  inp.value = _qaVal().dueDate || '';
+  inp.onchange = () => _qaSet('dueDate', inp.value || null);
+  ctl.appendChild(inp);
+  const mkBtn = (label, daysOffset) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'qd-btn'; b.textContent = label;
+    b.onclick = () => {
+      if(daysOffset === 'clear'){ inp.value=''; _qaSet('dueDate', null); return; }
+      const d = new Date(); d.setDate(d.getDate()+daysOffset);
+      const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      inp.value = iso; _qaSet('dueDate', iso);
+    };
+    return b;
+  };
+  ctl.appendChild(mkBtn('Today', 0));
+  ctl.appendChild(mkBtn('Tomorrow', 1));
+  ctl.appendChild(mkBtn('+1 wk', 7));
+  ctl.appendChild(mkBtn('Clear', 'clear'));
+  wrap.appendChild(ctl);
+}
+
+function _renderQAChips(wrap, label, key, options){
+  wrap.appendChild(_qaLbl(label));
+  const ctl = document.createElement('div');
+  ctl.className = 'qa-more-field-control';
+  options.forEach(([val, lbl]) => {
+    const b = document.createElement('button');
+    b.type='button'; b.className='mfield-chip-btn';
+    b.textContent = lbl;
+    if(_qaVal()[key] === val) b.classList.add('active');
+    b.onclick = () => {
+      const cur = _qaVal()[key];
+      if(cur === val){ _qaSet(key, null); b.classList.remove('active'); }
+      else{
+        Array.from(ctl.querySelectorAll('.mfield-chip-btn')).forEach(c=>c.classList.remove('active'));
+        b.classList.add('active');
+        _qaSet(key, val);
+      }
+    };
+    ctl.appendChild(b);
+  });
+  wrap.appendChild(ctl);
+}
+function _renderQACategory(wrap){
+  const cats = (typeof getCategoryDefs === 'function') ? getCategoryDefs() : [];
+  const opts = cats.map(c => [c.id, c.label]);
+  if(!opts.length) opts.push(['general','General']);
+  _renderQAChips(wrap, 'Life area', 'category', opts);
+}
+function _renderQAPriority(wrap){
+  _renderQAChips(wrap, 'Priority', 'priority', [
+    ['urgent','Urgent'],['high','High'],['normal','Normal'],['low','Low']
+  ]);
+}
+function _renderQAType(wrap){
+  _renderQAChips(wrap, 'Type', 'type', [
+    ['task','Task'],['waiting','Waiting'],['bug','Bug'],['idea','Idea'],['errand','Errand']
+  ]);
+}
+function _renderQARecur(wrap){
+  wrap.appendChild(_qaLbl('Repeats'));
+  const ctl = document.createElement('div');
+  ctl.className='qa-more-field-control';
+  const sel = document.createElement('select');
+  sel.className='mfield-in';
+  [['','None'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']].forEach(([v,l])=>{
+    const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);
+  });
+  sel.value = _qaVal().recur || '';
+  sel.onchange = () => _qaSet('recur', sel.value || null);
+  ctl.appendChild(sel);
+  wrap.appendChild(ctl);
+}
+function _renderQAStar(wrap){
+  wrap.appendChild(_qaLbl('Star'));
+  const ctl = document.createElement('div');
+  ctl.className='qa-more-field-control';
+  const b = document.createElement('button');
+  b.type='button'; b.className='mfield-chip-btn'+(_qaVal().starred?' active':'');
+  b.textContent = _qaVal().starred ? 'Starred' : 'Not starred';
+  b.onclick = () => {
+    const next = !_qaVal().starred;
+    _qaSet('starred', next || null);
+    b.classList.toggle('active', next);
+    b.textContent = next ? 'Starred' : 'Not starred';
+  };
+  ctl.appendChild(b);
+  wrap.appendChild(ctl);
+}
+function _renderQATags(wrap){
+  wrap.appendChild(_qaLbl('Tags'));
+  const ctl = document.createElement('div');
+  ctl.className='qa-more-field-control';
+  const inp = document.createElement('input');
+  inp.type='text'; inp.className='mfield-in';
+  inp.placeholder='comma-separated';
+  inp.value = (_qaVal().tags || []).join(', ');
+  inp.oninput = () => {
+    const tags = inp.value.split(',').map(s=>s.trim()).filter(Boolean);
+    _qaSet('tags', tags);
+  };
+  ctl.appendChild(inp);
+  wrap.appendChild(ctl);
+}
+function _qaLbl(text){
+  const l = document.createElement('span');
+  l.className='qa-more-field-lbl';
+  l.textContent = text;
+  return l;
+}
+
+function renderQuickAddPanel(){
+  const panel = document.getElementById('qaMorePanel');
+  if(!panel) return;
+  const enabled = (typeof cfg==='object' && cfg && Array.isArray(cfg.quickAddFields))
+    ? cfg.quickAddFields
+    : ['list','due'];
+  panel.replaceChildren();
+  if(!enabled.length){
+    const p = document.createElement('p');
+    p.className = 'qa-more-empty';
+    const a = document.createElement('a');
+    a.textContent = 'Pick fields in Settings';
+    a.onclick = () => { if(typeof showTab==='function') showTab('settings'); };
+    p.append('No fields enabled — ', a, '.');
+    panel.appendChild(p);
+    return;
+  }
+  enabled.forEach(key => {
+    const def = QUICK_ADD_FIELDS[key];
+    if(!def) return;
+    const f = document.createElement('div');
+    f.className = 'qa-more-field';
+    def.render(f);
+    panel.appendChild(f);
+  });
+}
+
+function toggleQuickAddPanel(){
+  const btn = document.getElementById('qaMoreToggle');
+  const panel = document.getElementById('qaMorePanel');
+  if(!btn || !panel) return;
+  const willOpen = panel.hidden;
+  btn.setAttribute('aria-expanded', String(willOpen));
+  panel.hidden = !willOpen;
+  if(willOpen) renderQuickAddPanel();
+}
+
+window.QUICK_ADD_FIELDS = QUICK_ADD_FIELDS;
+window.renderQuickAddPanel = renderQuickAddPanel;
+window.toggleQuickAddPanel = toggleQuickAddPanel;
+
+// Settings → Quick-add fields picker. Renders one checkbox per field so the
+// user can choose which subset appears in the inline "More options" panel.
+function renderQaFieldsCfg(){
+  const root = document.getElementById('qaFieldsCfg');
+  if(!root) return;
+  root.replaceChildren();
+  const enabledArr = (typeof cfg==='object' && cfg && Array.isArray(cfg.quickAddFields))
+    ? cfg.quickAddFields
+    : ['list','due'];
+  const enabled = new Set(enabledArr);
+  // Preserve declared order from QUICK_ADD_FIELDS so the picker is stable.
+  Object.entries(QUICK_ADD_FIELDS).forEach(([key, def]) => {
+    const lbl = document.createElement('label');
+    lbl.style.display = 'inline-flex';
+    lbl.style.alignItems = 'center';
+    lbl.style.gap = '6px';
+    lbl.style.fontSize = '12px';
+    lbl.style.color = 'var(--text-2)';
+    lbl.style.cursor = 'pointer';
+    lbl.style.padding = '6px 10px';
+    lbl.style.background = 'var(--bg-2)';
+    lbl.style.borderRadius = 'var(--r-sm)';
+    lbl.style.border = '1px solid var(--border)';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = enabled.has(key);
+    cb.style.cursor = 'pointer';
+    cb.onchange = () => {
+      if(cb.checked) enabled.add(key); else enabled.delete(key);
+      // Persist in declared order so the panel renders predictably.
+      const ordered = Object.keys(QUICK_ADD_FIELDS).filter(k => enabled.has(k));
+      if(typeof cfg === 'object' && cfg){
+        cfg.quickAddFields = ordered;
+        if(typeof saveState === 'function') saveState('user');
+      }
+      // If the inline panel is currently open, re-render so the change is
+      // visible immediately.
+      const panel = document.getElementById('qaMorePanel');
+      if(panel && !panel.hidden) renderQuickAddPanel();
+    };
+    lbl.appendChild(cb);
+    lbl.append(' ' + def.label);
+    root.appendChild(lbl);
+  });
+}
+window.renderQaFieldsCfg = renderQaFieldsCfg;
