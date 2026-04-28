@@ -144,22 +144,41 @@ test('parseQuickAdd: collapses multiple spaces left behind by token removal', ()
   assert.equal(r.name, 'write notes');
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TODO(human): Two conflict-resolution contracts the parser exhibits but
-// we haven't *locked in* with a test. The current code matches first-and-done
-// for non-tag tokens. Decide if that's correct UX, then add a test (or change
-// the parser if you want the last token to win).
-//
-// Behavior #1 — duplicate priorities:
-//   parse('task @urgent @low')
-//   currently → { name: 'task @low', props: { priority: 'urgent' } }
-//   First @-token wins; the second stays in the name.
-//
-// Behavior #2 — multiple date phrases:
-//   parse('buy milk today tomorrow')
-//   currently → today wins (else-if order); 'tomorrow' stays in the name.
-//
-// Add 5–10 lines of tests for whichever contract you want to commit to.
-// If you want both to "last token wins", change the parser instead and write
-// the tests against the new behavior.
-// ─────────────────────────────────────────────────────────────────────────────
+test('parseQuickAdd: duplicate priorities — first occurrence wins, second stays in name', () => {
+  // Contract: match() returns the first occurrence positionally, so the
+  // first priority the user typed is treated as their commitment. The
+  // second @-token survives in the title (the parser doesn't loop).
+  // Rationale for first-wins (vs. last-wins): users tend to type their
+  // intent first; a stray second priority is more often a typo than a
+  // deliberate revision. If product changes its mind, swap the regex
+  // for a global match + pick the last group, then update this test.
+  const parse = loadParser('2026-04-27');
+  const r = parse('task @urgent @low');
+  assert.equal(r.props.priority, 'urgent');
+  assert.equal(r.name, 'task @low');
+  // Mirror case: order in input flips the winner (positional, not semantic)
+  const r2 = parse('task @low @urgent');
+  assert.equal(r2.props.priority, 'low');
+  assert.equal(r2.name, 'task @urgent');
+});
+
+test('parseQuickAdd: multiple date phrases — cascade priority decides (today > tomorrow > next week > weekday)', () => {
+  // Contract: the parser uses an if/else-if cascade for dates, so an
+  // earlier branch wins regardless of input order. This is *semantic*
+  // priority (today is "more specific"), not positional priority like
+  // the priority/star tokens above. Both are intentional; this test
+  // makes the difference visible so future refactors don't accidentally
+  // unify them.
+  const parse = loadParser('2026-04-27');
+  const r1 = parse('buy milk today tomorrow');
+  assert.equal(r1.props.dueDate, '2026-04-27');
+  assert.equal(r1.name, 'buy milk tomorrow');
+  // Even with "tomorrow" first in input, "today" still wins
+  const r2 = parse('buy milk tomorrow today');
+  assert.equal(r2.props.dueDate, '2026-04-27');
+  assert.equal(r2.name, 'buy milk tomorrow');
+  // Today beats weekday too
+  const r3 = parse('haircut friday today');
+  assert.equal(r3.props.dueDate, '2026-04-27');
+  assert.match(r3.name, /friday/);
+});
