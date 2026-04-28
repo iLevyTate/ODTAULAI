@@ -291,39 +291,7 @@ To audit outbound traffic yourself, search the source for `fetch(`, dynamic `imp
 
 No framework, no bundler, no transpiler. Just **HTML, CSS, and vanilla JS modules** loaded in order from `index.html`.
 
-```mermaid
-flowchart LR
-  subgraph Browser["Your browser — everything runs here"]
-    UI["index.html<br/>ui.js · css/main.css"]
-    APP["app.js<br/>boot · routing"]
-    TASKS["tasks.js<br/>model · impact"]
-    TIMER["timer.js · audio.js<br/>pomodoro · wake-lock"]
-    STORE[("storage.js<br/>localStorage<br/>+ IndexedDB")]
-    AI["ai.js · intel-features.js<br/>Transformers.js"]
-    EMB[("embed-store.js<br/>vector cache")]
-    GEN["gen.js · ask.js<br/>tool-schema.js"]
-    CAL["calfeeds.js<br/>iCal parser"]
-    SYNC["sync.js<br/>PeerJS / WebRTC"]
-    SW["sw.js · pwa.js<br/>offline shell"]
-  end
-
-  CDN1{{"Hugging Face / jsDelivr<br/>(one-time, cached)"}} -. model weights .-> AI
-  CDN1 -. opt-in LLM .-> GEN
-  ICS{{"Your .ics URLs"}} -. subscriptions .-> CAL
-  PEER{{"PeerJS signalling<br/>(handshake only)"}} -. opt-in pairing .-> SYNC
-  PEER -. payload P2P .- SYNC
-
-  UI --> APP --> TASKS --> STORE
-  APP --> TIMER
-  TASKS --> AI --> EMB
-  AI --> GEN
-  APP --> CAL
-  APP --> SYNC
-  APP --> SW
-
-  classDef opt stroke-dasharray: 4 3,stroke:#888;
-  class GEN,SYNC,CAL opt;
-```
+<img width="1672" height="941" alt="OTLArchitecture" src="https://github.com/user-attachments/assets/a3809d41-8047-4fe0-87d6-73b20e0216ac" />
 
 <sub>Dashed boxes = strictly opt-in. Nothing connects out unless you turn it on.</sub>
 
