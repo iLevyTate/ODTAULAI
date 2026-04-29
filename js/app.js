@@ -333,6 +333,18 @@ window.classificationSetColorFromSelect = function(){
   const idx = Number(this.dataset.idx);
   if(typeof classificationSetColor === 'function') classificationSetColor(idx, this.value);
 };
+window.classificationSetFocusFromTextarea = function(){
+  const idx = Number(this.dataset.idx);
+  if(typeof classificationSetFocus === 'function') classificationSetFocus(idx, this.value);
+};
+window.classificationSetCoreValuesFromTextarea = function(){
+  const idx = Number(this.dataset.idx);
+  if(typeof classificationSetCoreValues === 'function') classificationSetCoreValues(idx, this.value);
+};
+window.classificationSetExamplesFromTextarea = function(){
+  const idx = Number(this.dataset.idx);
+  if(typeof classificationSetExamples === 'function') classificationSetExamples(idx, this.value);
+};
 window.syncCopyMyCode = function(){
   const el = document.getElementById('syncMyCode');
   const txt = el ? (el.textContent || '') : '';
