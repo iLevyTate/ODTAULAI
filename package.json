@@ -8,6 +8,8 @@
     "check:assets": "node scripts/check-assets.mjs",
     "check": "npm run check:version && npm run check:assets",
     "smoke": "node scripts/smoke-check.mjs",
+    "smoke:deep": "node scripts/smoke-deep.mjs",
+    "verify:handlers": "node scripts/verify-handlers.mjs",
     "bump:version": "node scripts/bump-version.mjs",
     "build:icons": "node scripts/build-icons.mjs"
   },

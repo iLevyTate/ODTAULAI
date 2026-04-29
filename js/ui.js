@@ -244,7 +244,7 @@ function _renderAskStatus(state,msg){
     }else if(!cfg || !cfg.enabled){
       inner = 'Local LLM is off. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Enable in Settings</button> to turn it on and download weights.';
     }else if(cached){
-      inner = 'Local LLM is enabled but not loaded yet. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> and click Load.';
+      inner = 'Local LLM is enabled but not loaded yet. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> and click Pre-load model.';
     }else{
       inner = 'Local LLM weights aren’t downloaded on this device. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> to download.';
     }
@@ -777,13 +777,13 @@ function renderBoard(visibleTasks){
       card.ondragend=function(){card.style.opacity='1'};
       card.onclick=function(){openTaskDetail(t.id)};
       const path=getTaskPath(t.id);
-      const breadcrumb=path.length>1?'<div style="font-size:10px;color:var(--text-3);margin-bottom:4px">'+esc(path.slice(0,-1).join(' › '))+'</div>':'';
+      const breadcrumb=path.length>1?'<div class="board-breadcrumb">'+esc(path.slice(0,-1).join(' › '))+'</div>':'';
       const dueIc=(typeof window.icon==='function')?window.icon('calendar',{size:12}):'';
       const ddc=t.dueDate&&typeof describeDue==='function'?describeDue(t.dueDate):{cls:getDueClass(t.dueDate),label:fmtDue(t.dueDate)};
       const dueMod=ddc&&ddc.cls?' date-chip--'+ddc.cls:'';
       const due=t.dueDate?'<span class="date-chip'+dueMod+'">'+dueIc+' '+esc(String(ddc.label||fmtDue(t.dueDate)||''))+'</span>':'';
       const tags=(t.tags||[]).slice(0,2).map(tg=>'<span class="tag-chip">'+esc(tg)+'</span>').join('');
-      const time=getRolledUpTime(t.id)>0?'<span class="task-elapsed" style="font-size:10px">'+fmtHMS(getRolledUpTime(t.id))+'</span>':'';
+      const time=getRolledUpTime(t.id)>0?'<span class="task-elapsed">'+fmtHMS(getRolledUpTime(t.id))+'</span>':'';
       card.innerHTML=breadcrumb
         +'<div class="board-card-name">'+esc(t.name)+'</div>'
         +'<div class="board-card-meta">'+due+tags+time+'</div>';

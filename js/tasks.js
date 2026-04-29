@@ -2120,8 +2120,8 @@ function renderBlockedBy(taskId){
   const blockers=t.blockedBy||[];
   el.innerHTML=`
     <div class="blocker-chips" id="blockerChips"></div>
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <select class="mfield-in" id="blockerSel" style="flex:1;font-size:12px">
+    <div class="blocker-add-row">
+      <select class="mfield-in blocker-sel" id="blockerSel">
         <option value="">Select blocking task…</option>
         ${tasks.filter(x=>x.id!==taskId&&x.status!=='done').map(x=>`<option value="${x.id}">${esc(x.name.slice(0,40))}</option>`).join('')}
       </select>
@@ -2428,20 +2428,11 @@ function renderQaFieldsCfg(){
   // Preserve declared order from QUICK_ADD_FIELDS so the picker is stable.
   Object.entries(QUICK_ADD_FIELDS).forEach(([key, def]) => {
     const lbl = document.createElement('label');
-    lbl.style.display = 'inline-flex';
-    lbl.style.alignItems = 'center';
-    lbl.style.gap = '6px';
-    lbl.style.fontSize = '12px';
-    lbl.style.color = 'var(--text-2)';
-    lbl.style.cursor = 'pointer';
-    lbl.style.padding = '6px 10px';
-    lbl.style.background = 'var(--bg-2)';
-    lbl.style.borderRadius = 'var(--r-sm)';
-    lbl.style.border = '1px solid var(--border)';
+    lbl.className = 'qa-field-chip';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.className = 'qa-field-chip-cb';
     cb.checked = enabled.has(key);
-    cb.style.cursor = 'pointer';
     cb.onchange = () => {
       if(cb.checked) enabled.add(key); else enabled.delete(key);
       // Persist in declared order so the panel renders predictably.

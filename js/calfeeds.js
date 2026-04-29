@@ -628,8 +628,8 @@ function renderCalFeedsPanel(){
           ? new Date(f.lastSync).toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
           : 'Never';
         const status = f.error
-          ? `<span style="color:#e74c3c;font-size:10px">✕ ${esc(f.error)}</span>`
-          : `<span style="color:#2ecc71;font-size:10px">✓ ${evCount} events · ${lastSync}</span>`;
+          ? `<span class="calfeed-status calfeed-status--error">✕ ${esc(f.error)}</span>`
+          : `<span class="calfeed-status calfeed-status--ok">✓ ${evCount} events · ${lastSync}</span>`;
         return `
           <div class="calfeed-row" data-id="${escAttr(f.id)}">
             <span class="calfeed-dot" style="background:${typeof sanitizeListColor==='function'?sanitizeListColor(f.color):'#888'}"></span>
@@ -681,19 +681,19 @@ function renderCalFeedsPanel(){
           </p>
         </div>
 
-        <button class="btn-primary" style="margin-top:10px;width:100%" data-action="submitAddCalFeed">Add Calendar</button>
+        <button class="btn-primary calfeed-submit" data-action="submitAddCalFeed">Add Calendar</button>
       </div>
     </details>
 
     <div class="calfeed-sync-row">
       <button class="btn-ghost btn-sm" data-action="syncAllCalFeedsAndRerender" ${_calFeeds.feeds.length?'':'disabled'}>↻ Refresh all</button>
-      <span class="calfeed-hint" style="font-size:10px">Auto-refresh runs on app open. Events cache locally for offline use.</span>
+      <span class="calfeed-hint">Auto-refresh runs on app open. Events cache locally for offline use.</span>
     </div>
 
     <div id="workerInstructions" class="calfeed-worker-panel" style="display:none">
-      <button class="btn-ghost btn-sm" data-action="hideWorkerInstructions" style="float:right">×</button>
-      <h4 style="margin-top:0">Deploy a personal CORS proxy (free, 15 min)</h4>
-      <ol style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
+      <button class="btn-ghost btn-sm calfeed-worker-close" data-action="hideWorkerInstructions">×</button>
+      <h4 class="mt-0">Deploy a personal CORS proxy (free, 15 min)</h4>
+      <ol class="calfeed-worker-list">
         <li>Sign up at <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer">dash.cloudflare.com</a> (free)</li>
         <li>Go to <strong>Workers & Pages</strong> → <strong>Create</strong> → <strong>Create Worker</strong></li>
         <li>Name it (e.g. "ical-proxy"), click <strong>Deploy</strong></li>
@@ -717,12 +717,12 @@ function renderCalFeedsPanel(){
     });
   },
 };</pre>
-      <ol start="5" style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
+      <ol start="5" class="calfeed-worker-list">
         <li>Click <strong>Save and deploy</strong></li>
         <li>Copy your Worker URL (looks like <code>ical-proxy.your-name.workers.dev</code>)</li>
         <li>In OdTauLai, paste it in the "CORS proxy URL" field above, appending <code>?url=</code></li>
       </ol>
-      <p style="font-size:11px;color:var(--text-3)"><strong>Privacy note:</strong> This Worker only forwards requests to <code>calendar.google.com</code>. You're the only one using it. Cloudflare's free tier gives 100k requests/day, more than enough for personal use.</p>
+      <p class="calfeed-worker-note"><strong>Privacy note:</strong> This Worker only forwards requests to <code>calendar.google.com</code>. You're the only one using it. Cloudflare's free tier gives 100k requests/day, more than enough for personal use.</p>
     </div>
   `;
   // Wire per-row buttons via delegated listeners. The row's data-id carries

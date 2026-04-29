@@ -904,7 +904,7 @@ function _renderPendingOps(){
     ${dangerHtml}
     <div class="pending-actions">
       <button type="button" class="btn-ghost btn-sm" data-action="intelRejectPending">Reject all</button>
-      <button type="button" class="btn-primary" data-action="intelApplyPending">Apply selected</button>
+      <button type="button" class="btn-primary btn-sm" data-action="intelApplyPending">Apply selected</button>
     </div>`;
   _setIntelStatus('idle', 'Review proposed changes below');
 }
@@ -1307,7 +1307,7 @@ function _renderBreakdown(){
       ${s.high ? `<span class="breakdown-badge high">${s.high}↑</span>` : ''}
     </div>`;
   }).join('');
-  el.innerHTML = rows || '<span style="color:var(--text-3);font-size:12px">Run alignment to see</span>';
+  el.innerHTML = rows || '<span class="text-12-muted">Run alignment to see</span>';
 }
 
 function _renderValuesGrid(){
@@ -1370,7 +1370,7 @@ function renderAIPanel(){
           </details>
         </div>
         <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
-          <div class="intel-progress-track"><div class="intel-progress-bar" id="intelProgressBar" style="width:0%"></div></div>
+          <div class="intel-progress-track"><div class="intel-progress-bar progress-bar" id="intelProgressBar"></div></div>
           <div class="intel-progress-info"><span id="intelProgressPct">0%</span> <span id="intelProgressTxt"></span></div>
         </div>
         <div class="intel-toolbar-row">
@@ -1543,7 +1543,7 @@ async function runMdBreakdown(){
     );
     if(!res || !Array.isArray(res.subtasks) || !res.subtasks.length){
       body.innerHTML = '<span class="intel-muted">LLM didn\u2019t return usable subtasks. Try adding a short description and retry.</span>'
-        + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown" style="margin-top:8px">Retry</button>';
+        + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Retry</button>';
       return;
     }
     window._mdBreakdownSuggestion = { taskId: t.id, subtasks: res.subtasks };
@@ -1555,7 +1555,7 @@ async function runMdBreakdown(){
       </label>`).join('');
     body.innerHTML = `
       <div class="md-breakdown-list">${rows}</div>
-      ${res.rationale ? `<div class="pending-rationale" style="margin-top:8px">${esc(res.rationale)}</div>` : ''}
+      ${res.rationale ? `<div class="pending-rationale">${esc(res.rationale)}</div>` : ''}
       <div class="md-breakdown-actions">
         <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Re-run</button>
         <button type="button" class="md-breakdown-btn md-breakdown-btn--primary" data-action="acceptMdBreakdown">Add as subtasks</button>
@@ -1563,7 +1563,7 @@ async function runMdBreakdown(){
   }catch(err){
     console.warn('[breakdown]', err);
     body.innerHTML = '<span class="intel-muted">Something went wrong. Try again.</span>'
-      + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown" style="margin-top:8px">Retry</button>';
+      + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Retry</button>';
   }
 }
 
@@ -1608,11 +1608,11 @@ async function intelFindDuplicatesUI(){
   const sec = document.getElementById('intelDupSection');
   if(!sec) return;
   sec.style.display = '';
-  sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">Scanning…</span>';
+  sec.innerHTML = '<span class="text-12-muted">Scanning…</span>';
   try{
     const pairs = await findDuplicates(0.9);
     if(!pairs.length){
-      sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">No near-duplicate pairs (≥0.9) found.</span>';
+      sec.innerHTML = '<span class="text-12-muted">No near-duplicate pairs (≥0.9) found.</span>';
       window._dupSimMap = null;
       return;
     }
@@ -1628,7 +1628,7 @@ async function intelFindDuplicatesUI(){
     // different" with a short reason. Bounded to keep this interactive.
     const verdicts = new Map();
     if(typeof isGenReady === 'function' && isGenReady() && typeof genDedupeJudge === 'function'){
-      sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">Asking LLM to adjudicate top pairs…</span>';
+      sec.innerHTML = '<span class="text-12-muted">Asking LLM to adjudicate top pairs…</span>';
       const JUDGE = Math.min(6, shown.length);
       for(let i = 0; i < JUDGE; i++){
         const p = shown[i];
@@ -1655,7 +1655,7 @@ async function intelFindDuplicatesUI(){
       </div>`;
     }).join('');
   }catch(e){
-    sec.innerHTML = '<span style="color:var(--danger)">Failed to scan</span>';
+    sec.innerHTML = '<span class="text-danger">Failed to scan</span>';
   }
 }
 
@@ -1964,7 +1964,7 @@ async function smartAddParseWithLLM(){
       if(parsed.rationale && prev){
         prev.insertAdjacentHTML(
           'beforeend',
-          `<div class="pending-rationale" style="margin-top:6px">${esc(parsed.rationale)}</div>`,
+          `<div class="pending-rationale">${esc(parsed.rationale)}</div>`,
         );
       }
     }
@@ -2095,7 +2095,7 @@ function openWhatNext(){
           ${i === 0 && calHint ? `<span class="wn-cal-hint" role="note">${esc(calHint)}</span>` : ''}
           ${i === 0 ? '<span class="wn-why" id="wnWhy" style="display:none"></span>' : ''}
         </button>`).join('')
-      : '<span style="color:var(--text-3);font-size:12px">Nothing queued — add tasks or clear filters.</span>';
+      : '<span class="text-12-muted">Nothing queued — add tasks or clear filters.</span>';
   }
   o.style.display = '';
   if(typeof openFocusTrap === 'function') openFocusTrap(o);
@@ -2212,7 +2212,7 @@ function renderGenSettings(){
   if(!cfg.enabled) actionLabel = 'Enable above first';
   else if(loading) actionLabel = 'Loading…';
   else if(readyThisModel) actionLabel = 'Reload model';
-  else if(cached) actionLabel = 'Load model';
+  else if(cached) actionLabel = 'Pre-load model';
   else actionLabel = `Download model (~${sizeMb} MB)`;
   const actionDisabled = !cfg.enabled || loading;
 
@@ -2229,8 +2229,8 @@ function renderGenSettings(){
 
   host.innerHTML = `
     <div class="gen-settings">
-      <div class="srow" style="justify-content:space-between;gap:10px">
-        <span class="sr-lbl" style="font-size:13px">Enable generative Ask (beta)</span>
+      <div class="srow srow--spread">
+        <span class="sr-lbl sr-lbl--lg">Enable generative Ask (beta)</span>
         <div class="toggle ${cfg.enabled ? 'on' : ''}" id="genEnableToggle" data-action="toggleGenEnabled" role="switch" aria-checked="${cfg.enabled}"><div class="tknob"></div></div>
       </div>
       <p class="gen-settings-lead">
@@ -2251,12 +2251,12 @@ function renderGenSettings(){
       ${ramHint === 'low' ? `<div class="gen-settings-warn">Your device reports low RAM. The 135M preset is recommended.</div>` : ''}
       ${ramHint === 'ios-unknown' && (preset && preset.sizeMb > 150) ? `<div class="gen-settings-warn">On iOS the WASM fallback uses extra RAM. If the tab reloads during generation, switch to the 135M preset.</div>` : ''}
       <div class="gen-settings-row">
-        <label for="genTimeout" class="gen-settings-lbl">Timeout (sec)</label>
+        <label for="genTimeout" class="gen-settings-lbl" title="Max time allowed for generating a response">Max generation time (sec)</label>
         <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" data-onchange="setGenTimeoutFromInput" ${cfg.enabled ? '' : 'disabled'}>
       </div>
       <div class="gen-settings-status" id="genSettingsStatus">${esc(statusText)}</div>
       <div id="genProgressWrap" class="intel-progress-wrap" style="display:${loading ? '' : 'none'}">
-        <div class="intel-progress-track"><div class="intel-progress-bar" id="genProgressBar" style="width:0%"></div></div>
+        <div class="intel-progress-track"><div class="intel-progress-bar progress-bar" id="genProgressBar"></div></div>
         <div class="intel-progress-info"><span id="genProgressPct">0%</span> <span id="genProgressTxt"></span></div>
       </div>
       ${errForThisModel ? `<div class="gen-settings-warn" id="genSettingsError" role="alert">${esc(errForThisModel)}</div>` : ''}

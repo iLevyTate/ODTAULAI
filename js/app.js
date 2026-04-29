@@ -161,9 +161,9 @@ function renderArchive(){
     const totalG=a.goals?a.goals.length:0;
     const d=document.createElement('button');d.type='button';d.className='hist-day';d.setAttribute('aria-expanded','false');
     d.onclick=function(){this.classList.toggle('open');this.setAttribute('aria-expanded',this.classList.contains('open')?'true':'false')};
-    d.innerHTML=`<div class="hist-day-hdr"><span class="hist-day-date">${prettyDate(a.date)}</span><div class="hist-day-stats"><div class="hist-day-stat"><span style="color:var(--work)">${a.totalPomos||0}</span> sessions</div><div class="hist-day-stat"><span style="color:var(--long)">${fmtShort(a.totalFocusSec||0)}</span></div>${totalG?`<div class="hist-day-stat"><span style="color:var(--short)">${doneG}/${totalG}</span> goals</div>`:''}</div></div>`
+    d.innerHTML=`<div class="hist-day-hdr"><span class="hist-day-date">${prettyDate(a.date)}</span><div class="hist-day-stats"><div class="hist-day-stat"><span class="text-work">${a.totalPomos||0}</span> sessions</div><div class="hist-day-stat"><span class="text-long">${fmtShort(a.totalFocusSec||0)}</span></div>${totalG?`<div class="hist-day-stat"><span class="text-short">${doneG}/${totalG}</span> goals</div>`:''}</div></div>`
       +`<div class="hist-day-detail">`
-      +(a.goals&&a.goals.length?`<div class="hist-day-section"><div class="hist-day-section-title">Goals</div>${a.goals.map(g=>`<div class="hist-goal">${g.done?'✓':'○'} ${esc(g.text)}${g.doneAt?' <span style="color:#2a3a4a">('+esc(String(g.doneAt))+')</span>':''}</div>`).join('')}</div>`:'')
+      +(a.goals&&a.goals.length?`<div class="hist-day-section"><div class="hist-day-section-title">Goals</div>${a.goals.map(g=>`<div class="hist-goal">${g.done?'✓':'○'} ${esc(g.text)}${g.doneAt?' <span class="text-4">('+esc(String(g.doneAt))+')</span>':''}</div>`).join('')}</div>`:'')
       +(a.tasks&&a.tasks.length?`<div class="hist-day-section"><div class="hist-day-section-title">Tasks</div>${a.tasks.map(t=>`<div class="hist-task">${esc(t.name)}: ${fmtHMS(t.totalSec||0)} (${t.sessions||0} sessions)</div>`).join('')}</div>`:'')
       +(a.timeLog&&a.timeLog.length?`<div class="hist-day-section"><div class="hist-day-section-title">Session Log</div>${a.timeLog.slice().reverse().slice(0,20).map(l=>`<div class="hist-log">${esc(l.time)} — ${esc(l.name)} (${fmtShort(l.durSec)})</div>`).join('')}</div>`:'')
       +`</div>`;
@@ -625,7 +625,7 @@ async function renderSystemInfo(info){
     <div><strong>Storage:</strong> ${storageLine}</div>
     <div><strong>Intelligence:</strong> ${typeof isIntelReady === 'function' && isIntelReady()
       ? `<span class="sys-info-ok">${okIc} Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
-      : '<span style="color:var(--text-3)">Loads in background (WebGPU ~110 MB, WASM ~33 MB, cached offline)</span>'}</div>`;
+      : '<span class="text-3">Loads in background (WebGPU ~110 MB, WASM ~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
 setTimeout(() => { renderSystemInfo(); _checkStoragePressure(); }, 400);
