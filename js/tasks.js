@@ -1201,6 +1201,7 @@ function getHabitLoggedSecTotal(t){
 function cycleStatus(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
+  const backup=JSON.parse(JSON.stringify(t));
   const idx=STATUS_ORDER.indexOf(t.status||'open');
   const next=STATUS_ORDER[(idx+1)%STATUS_ORDER.length];
   if(next==='done'&&t.recur){completeHabitCycle(t)}
@@ -1213,12 +1214,19 @@ function cycleStatus(id){
   const list=gid('taskList');
   if(list&&typeof flipReorder==='function')flipReorder(list,()=>renderTaskList());
   else renderTaskList();
-  saveState('user')
+  saveState('user');
+  if(typeof showActionToast==='function'){
+    showActionToast('Status: '+STATUSES[t.status].label, 'Undo', ()=>{
+      const u=findTask(id);
+      if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+    }, 4000);
+  }
 }
 
 function toggleTaskDoneQuick(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
+  const backup=JSON.parse(JSON.stringify(t));
   if(t.status==='done'){t.status='open';t.completedAt=null}
   else{
     if(t.recur){
@@ -1243,7 +1251,13 @@ function toggleTaskDoneQuick(id){
       }
     },10);
   }
-  renderTaskList();saveState('user')
+  renderTaskList();saveState('user');
+  if(typeof showActionToast==='function'){
+    showActionToast(t.status==='done'?'Task done':'Task reopened', 'Undo', ()=>{
+      const u=findTask(id);
+      if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+    }, 4000);
+  }
 }
 
 // Haptic helper — vibrate on supporting devices (iOS Safari + all Android)

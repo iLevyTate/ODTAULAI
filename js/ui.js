@@ -764,6 +764,8 @@ function renderBoard(visibleTasks){
       const srcId=parseInt(e.dataTransfer.getData('text/plain'),10);
       if(!Number.isFinite(srcId)||srcId<=0)return;
       const src=findTask(srcId);if(!src)return;
+      if(src.status===st)return;
+      const backup=JSON.parse(JSON.stringify(src));
       src.status=st;
       if(st==='done'){
         if(src.recur && typeof completeHabitCycle==='function'){completeHabitCycle(src)}
@@ -771,6 +773,12 @@ function renderBoard(visibleTasks){
       }
       else src.completedAt=null;
       renderTaskList();saveState('user');
+      if(typeof showActionToast==='function'){
+        showActionToast('Moved to '+STATUSES[st].label, 'Undo', ()=>{
+          const u=findTask(srcId);
+          if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+        }, 4000);
+      }
     };
     col.innerHTML='<div class="board-col-hdr"><span class="status-badge '+status.cls+'">'+status.label+'</span><span class="cc-count">'+colTasks.length+'</span></div><div class="board-col-body"></div>';
     const body=col.querySelector('.board-col-body');
@@ -792,11 +800,77 @@ function renderBoard(visibleTasks){
       card.innerHTML=breadcrumb
         +'<div class="board-card-name">'+esc(t.name)+'</div>'
         +'<div class="board-card-meta">'+due+tags+time+'</div>';
+
+      // ── Touch drag-and-drop (mobile Kanban) ─────────────────────────────
+      // Ghost-element pattern: clone the card at a fixed position that follows
+      // the finger. elementFromPoint() (with ghost temporarily display:none)
+      // resolves which board column is under the touch. Mirrors the mouse
+      // ondragstart/ondrop path so status changes are committed identically.
+      let _ghost=null,_srcCol=col,_overCol=null;
+      function _applyDrop(dropSt){
+        if(!dropSt||dropSt===(t.status||'open'))return;
+        const src=findTask(t.id);if(!src)return;
+        const backup=JSON.parse(JSON.stringify(src));
+        src.status=dropSt;
+        if(dropSt==='done'){
+          if(src.recur&&typeof completeHabitCycle==='function')completeHabitCycle(src);
+          else src.completedAt=stampCompletion();
+        } else {
+          src.completedAt=null;
+        }
+        if(typeof haptic==='function')haptic(30);
+        renderTaskList();saveState('user');
+        if(typeof showActionToast==='function'){
+          showActionToast('Moved to '+STATUSES[dropSt].label, 'Undo', ()=>{
+            const u=findTask(t.id);
+            if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+          }, 4000);
+        }
+      }
+      card.addEventListener('touchstart',function(e){
+        if(e.target.closest('button'))return;
+        const r=card.getBoundingClientRect();
+        _ghost=card.cloneNode(true);
+        _ghost.style.cssText='position:fixed;top:'+r.top+'px;left:'+r.left+'px;width:'+r.width+'px;z-index:9999;pointer-events:none;opacity:.88;box-shadow:0 10px 32px rgba(0,0,0,.55);border-radius:var(--r-md,10px);transform:scale(1.04);transition:none';
+        document.body.appendChild(_ghost);
+        card.style.opacity='.28';
+        e.preventDefault();
+      },{passive:false});
+      card.addEventListener('touchmove',function(e){
+        if(!_ghost)return;
+        const touch=e.touches[0];
+        const gh=_ghost.getBoundingClientRect();
+        _ghost.style.top=(touch.clientY-gh.height/2)+'px';
+        _ghost.style.left=(touch.clientX-gh.width/2)+'px';
+        _ghost.style.display='none';
+        const el=document.elementFromPoint(touch.clientX,touch.clientY);
+        _ghost.style.display='';
+        const targetCol=el&&el.closest('.board-col');
+        if(targetCol!==_overCol){
+          if(_overCol)_overCol.classList.remove('drop-target');
+          _overCol=targetCol||null;
+          if(_overCol&&_overCol!==_srcCol)_overCol.classList.add('drop-target');
+        }
+        if(e.cancelable)e.preventDefault();
+      },{passive:false});
+      function _touchEnd(){
+        if(!_ghost)return;
+        _ghost.remove();_ghost=null;
+        card.style.opacity='1';
+        if(_overCol)_overCol.classList.remove('drop-target');
+        const dropSt=_overCol?_overCol.dataset.status:null;
+        _overCol=null;
+        _applyDrop(dropSt);
+      }
+      card.addEventListener('touchend',_touchEnd,{passive:true});
+      card.addEventListener('touchcancel',_touchEnd,{passive:true});
+      // ── end touch DnD ────────────────────────────────────────────────────
+
       body.appendChild(card)
     });
     if(!colTasks.length){
       const empty=document.createElement('div');empty.className='board-col-empty';
-      empty.textContent='Drop tasks here';body.appendChild(empty);
+      empty.textContent=isMobile ? 'No tasks' : 'Drop tasks here';body.appendChild(empty);
     }
     board.appendChild(col)
   })
