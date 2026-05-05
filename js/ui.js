@@ -247,15 +247,32 @@ function _renderAskStatus(state,msg){
     const cfg = typeof getGenCfg === 'function' ? getGenCfg() : null;
     const cached = !!(cfg && typeof isGenDownloaded === 'function' && isGenDownloaded(cfg.modelId));
     const loading = typeof isGenLoading === 'function' && isGenLoading();
+    // Look up the chosen preset's headline size so the user knows what
+    // they're agreeing to before tapping Download. Falls back to a
+    // conservative "~230 MB" if the preset list isn't reachable for any
+    // reason (it always is in practice — gen.js loads first).
+    let sizeHint = '~230 MB';
+    try{
+      if(cfg && typeof getGenPresets === 'function'){
+        const presets = getGenPresets() || [];
+        const p = presets.find(x => x && x.id === cfg.modelId);
+        if(p && typeof p.sizeMb === 'number') sizeHint = '~' + p.sizeMb + ' MB';
+      }
+    }catch(_){}
     let inner;
     if(loading){
-      inner = 'Local LLM is still loading — give it a moment and try again.';
-    }else if(!cfg || !cfg.enabled){
-      inner = 'Local LLM is off. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Enable in Settings</button> to turn it on and download weights.';
-    }else if(cached){
-      inner = 'Local LLM is enabled but not loaded yet. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> and click Pre-load model.';
+      inner = 'Local AI is still loading — give it a moment and try again.';
     }else{
-      inner = 'Local LLM weights aren’t downloaded on this device. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> to download.';
+      // One-tap download: genDownloadClick flips cfg.enabled itself if it's
+      // off, so a single button covers both "never enabled" and "enabled
+      // but not yet downloaded." Stays on-device — no cloud, no API key.
+      const head = cached
+        ? 'Local AI is ready but not loaded into memory yet.'
+        : 'This app runs the chat model fully on-device. Nothing leaves your browser. First time needs a one-off ' + sizeHint + ' download.';
+      const btnLabel = cached ? 'Load now' : 'Download local AI (' + sizeHint + ')';
+      inner = head
+        + ' <button type="button" class="btn-ghost btn-sm cmdk-ask-enable" data-action="genDownloadClick">'
+        + btnLabel + '</button>';
     }
     reply.innerHTML = '<div class="cmdk-ask-error">' + inner + '</div>';
   }

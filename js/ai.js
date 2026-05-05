@@ -125,6 +125,7 @@ function _showGenLoadRibbonIndeterminate(detail){
 
 /** Set the generative-LLM chip sub-state without affecting embedding state. */
 function syncGenChip(state, msg){
+  const wasReady = _genChipState === 'ready';
   _genChipState = state || 'idle';
   _genChipMsg = msg || '';
   if(_genChipState !== 'loading' && _genChipState !== 'working' && _genChipState !== 'syncing'){
@@ -132,6 +133,20 @@ function syncGenChip(state, msg){
   }
   const c = _composeChipState();
   _renderHeaderAIChip(c.state, c.msg);
+  // If the LLM just transitioned to ready and the Ask sheet is sitting in the
+  // "need-model" empty state, refresh it so the inline Download button is
+  // replaced with a normal idle prompt the user can submit immediately.
+  // Avoids the "I downloaded the model… now what?" dead end.
+  if(_genChipState === 'ready' && !wasReady && typeof document !== 'undefined'){
+    const reply = document.getElementById('cmdkAskReply');
+    if(reply && reply.querySelector('.cmdk-ask-enable')){
+      reply.textContent = '';
+      const ok = document.createElement('div');
+      ok.className = 'cmdk-ask-done';
+      ok.textContent = 'Local AI is ready — type your request and press Enter.';
+      reply.appendChild(ok);
+    }
+  }
 }
 
 /** Header pill: model load / ready / error — visible on every tab */
