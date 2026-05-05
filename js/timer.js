@@ -109,9 +109,9 @@ function _mkBtn(cls,label,handler){const b=document.createElement('button');b.cl
 function renderCtrls(){
   const c=gid('ctrls');c.textContent='';
   if(!running&&!finished&&remaining===totalDuration){c.appendChild(_mkBtn('btn btn-primary','Start',startTimer))}
-  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
-  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
-  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
+  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','Reset Cycle',resetAll))}
+  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-danger','Reset Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','Reset Cycle',resetAll))}
+  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','Reset Cycle',resetAll))}
 }
 
 // Sync ring visual state with running status (for pulse animation)
@@ -211,6 +211,17 @@ function skipPhase(){
   else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500);
 }
 function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState('user')}
+// Reset only the current phase (work, short, long) back to its full duration
+// without disturbing the cycle position, the running phase, or other phases'
+// progress. Time already worked this phase is folded back into the linked
+// active task so it isn't lost.
+function resetPhase(){
+  running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();fireCounts={};
+  if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}
+  setPhaseTime();renderTimerChrome();renderCtrls();_syncRingState();saveState('user');
+  if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
+}
+window.resetPhase=resetPhase;
 
 // ========== STOPWATCH ==========
 function swToggle(){
