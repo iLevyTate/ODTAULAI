@@ -221,6 +221,26 @@ function _cmdkFootAskText(){
     foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
   }
 }
+// Render a free-form prose answer from the on-device model. Kept separate
+// from _renderAskStatus so it can host longer multi-line replies (chat-style)
+// without being mistaken for an error or "done" toast. textContent only —
+// the LLM output is not trusted as HTML.
+function _renderAskAnswer(text){
+  const reply = gid('cmdkAskReply');
+  if(!reply) return;
+  reply.replaceChildren();
+  const wrap = document.createElement('div');
+  wrap.className = 'cmdk-ask-answer';
+  const body = document.createElement('div');
+  body.className = 'cmdk-ask-answer-body';
+  body.textContent = String(text || '').trim();
+  wrap.appendChild(body);
+  const foot = document.createElement('div');
+  foot.className = 'cmdk-ask-answer-foot';
+  foot.textContent = 'Answered on-device. No changes were applied.';
+  wrap.appendChild(foot);
+  reply.appendChild(wrap);
+}
 function _renderAskStatus(state,msg){
   const reply=gid('cmdkAskReply');if(!reply)return;
   if(state==='streaming'){
@@ -322,6 +342,14 @@ async function cmdkAskSubmit(){
       return;
     }
     if(!res.ops.length){
+      // Free-form chat answer (e.g. "what's overdue?") — surface the prose
+      // the model produced instead of treating "no ops to apply" as an
+      // empty result. Without this branch, a plain question never gets an
+      // answer back in the UI.
+      if(res.chatAnswer){
+        _renderAskAnswer(res.chatAnswer);
+        return;
+      }
       _renderAskStatus('empty','No actionable changes — nothing will be applied.');
       return;
     }
@@ -1013,7 +1041,16 @@ function openTaskDetail(id){
       const b=document.createElement('button');b.className='recur-opt'+((t.recur||'none')===key?' active':'');
       b.textContent=lbl;
       if(key && key.startsWith('after')) b.title='Schedule next due ' + key.replace(/^after(\d+)d$/, '$1 day(s)') + ' AFTER completion (won\'t pile up if you finish late)';
-      b.onclick=function(){t.recur=key==='none'?null:key;[...rc.children].forEach(c=>c.classList.remove('active'));b.classList.add('active')};
+      b.onclick=function(){
+        t.recur=key==='none'?null:key;
+        [...rc.children].forEach(c=>c.classList.remove('active'));
+        b.classList.add('active');
+        // First-time recurrence on a task with no due date defaults to today
+        // so it actually shows up in Today / Habits views immediately.
+        if(t.recur && !t.dueDate && typeof todayISO === 'function') t.dueDate = todayISO();
+        if(typeof saveState === 'function') saveState('user');
+        if(typeof renderTaskList === 'function') renderTaskList();
+      };
       rc.appendChild(b)
     })
   }

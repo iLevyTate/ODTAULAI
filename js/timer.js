@@ -109,9 +109,9 @@ function _mkBtn(cls,label,handler){const b=document.createElement('button');b.cl
 function renderCtrls(){
   const c=gid('ctrls');c.textContent='';
   if(!running&&!finished&&remaining===totalDuration){c.appendChild(_mkBtn('btn btn-primary','Start',startTimer))}
-  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','Reset Cycle',resetAll))}
-  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-danger','Reset Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','Reset Cycle',resetAll))}
-  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','Reset Cycle',resetAll))}
+  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-skip','↻ Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','↻ Cycle',resetAll))}
+  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-skip','↻ Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','↻ Cycle',resetAll))}
+  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-skip','↻ Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','↻ Cycle',resetAll))}
 }
 
 // Sync ring visual state with running status (for pulse animation)

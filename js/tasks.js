@@ -692,6 +692,22 @@ function findTask(id){
 
 // Tree helpers
 function getTaskChildren(parentId){return tasks.filter(t=>(t.parentId||null)===parentId)}
+// Whether a child task may render as part of a parent subtree the user has
+// already expanded into. The parent passed the smart-view filter; the child
+// may not have, but it should still appear so the user sees the complete
+// tree. Two hard exceptions remain so users can't accidentally surface
+// items they explicitly removed from view:
+//   - Archived children stay hidden unless we're explicitly in archive view.
+//   - hiddenUntil-snoozed children stay hidden unless we're in snooze view.
+function _subtaskAllowedUnderShownParent(t){
+  if(!t) return false;
+  const today = (typeof todayISO === 'function') ? todayISO() : null;
+  if(t.archived && smartView !== 'archived') return false;
+  if(today && t.hiddenUntil && t.hiddenUntil > today
+     && smartView !== 'snoozed' && smartView !== 'archived'
+     && smartView !== 'completed') return false;
+  return true;
+}
 function hasChildren(taskId){return tasks.some(t=>t.parentId===taskId)}
 function getTaskDescendantIds(taskId){
   const result=[],seen=new Set(),queue=[taskId];
@@ -1939,18 +1955,27 @@ function renderTaskList(){
     if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
     return;
   }
-  function renderNode(parentId,depth){
+  function renderNode(parentId,depth,inShownSubtree){
     const children=getTaskChildren(parentId);
     const sorted=sortTasks(children);
     sorted.forEach(t=>{
-      if(visibleIds.has(t.id)||hasVisibleDescendant(t.id,visibleIds)){
+      const selfMatch=visibleIds.has(t.id);
+      const descMatch=hasVisibleDescendant(t.id,visibleIds);
+      // Once an ancestor matched the filter we render its whole subtree
+      // regardless of per-task filter status — otherwise expanding a parent
+      // and missing half its subtasks (e.g. completed children in an "active"
+      // smart view) reads as "subtasks not appearing." Archived/snoozed
+      // tasks still respect global hide-rules so users can't accidentally
+      // resurrect deleted-feeling items.
+      const includeFromAncestor = inShownSubtree && _subtaskAllowedUnderShownParent(t);
+      if(selfMatch||descMatch||includeFromAncestor){
         renderTaskItem(t,depth);
         if(subtaskPromptParent===t.id)renderSubtaskForm(t.id,depth+1);
-        if(!t.collapsed)renderNode(t.id,depth+1);
+        if(!t.collapsed)renderNode(t.id,depth+1,inShownSubtree||selfMatch||descMatch);
       }
     });
   }
-  renderNode(null,0);
+  renderNode(null,0,false);
   // Long-list affordance: show/hide the scroll-progress bar once DOM commits.
   if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
 }
@@ -2021,11 +2046,16 @@ function renderGroupedTasks(visibleTasks){
     if(!isCol){
       items.forEach(t=>{
         renderTaskItem(t,0);
-        // Show descendants inline (no further grouping) if not collapsed
+        // Show descendants inline (no further grouping) if not collapsed.
+        // Once we render a parent at the group level, render its whole
+        // subtree — matching the tree-mode rule above. visibleSet is still
+        // consulted for "self matched filter," but a non-matching subtask
+        // under a visible parent is included so the user sees the complete
+        // tree they expanded into.
         if(!t.collapsed){
           function renderKids(pid,depth){
             getTaskChildren(pid).forEach(c=>{
-              if(!visibleSet.has(c.id)) return;
+              if(!_subtaskAllowedUnderShownParent(c)) return;
               renderTaskItem(c,depth);
               if(!c.collapsed) renderKids(c.id, depth+1);
             });

@@ -304,6 +304,24 @@ function _schemaReadOnly(name){
   return !!(s && s.readOnly);
 }
 
+// Pull a human-readable answer out of accumulated LLM output. Strips code
+// fences, drops bare JSON / tool-call blocks, collapses whitespace, and
+// caps length so a runaway generation doesn't blow up the UI. Returns ''
+// when nothing usable remains (caller falls back to PARSE_FAILED).
+function _extractProseAnswer(raw){
+  if(typeof raw !== 'string' || !raw) return '';
+  let s = raw;
+  s = s.replace(/```[\s\S]*?```/g, ' ');
+  s = s.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, ' ');
+  s = s.replace(/^\s*\[[\s\S]*?\]\s*$/m, ' ');
+  const lines = s.split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !/^[\[\]\{\},]+$/.test(l) && !/^"[^"]*"\s*:/.test(l));
+  const joined = lines.join('\n').trim();
+  if(joined.length < 4) return '';
+  return joined.length > 1200 ? joined.slice(0, 1200) + '…' : joined;
+}
+
 /**
  * @param {string} query
  * @param {{ onToken?:(t:string)=>void, onReadRound?:(summary:object)=>void, signal?:AbortSignal }} [opts]
@@ -440,6 +458,17 @@ async function cognitaskRun(query, opts){
   }
 
   if(!gotParse || lastFinal == null){
+    // Free-form chat fallback: if the model produced prose instead of a
+    // tool-call JSON array, treat the prose as the answer rather than a
+    // parse failure. Op-style queries still flow through validateOps below;
+    // this only kicks in for "what's overdue?" / "summarize my week" style
+    // questions that have no write operations to apply. Without it the UI
+    // throws away a perfectly good answer and reports "Couldn't parse."
+    const chatAnswer = _extractProseAnswer(allRaw);
+    if(chatAnswer){
+      if(typeof pushAskHistory === 'function') pushAskHistory(q);
+      return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw, truncated: false, readRounds, chatAnswer };
+    }
     return { ok: false, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw, truncated: false, readRounds, reason: 'PARSE_FAILED:' + (lastError && lastError.message ? lastError.message : 'no_ops') };
   }
 

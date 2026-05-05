@@ -3362,6 +3362,9 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .cmdk-ask-error button{margin-left:8px;vertical-align:middle}
 .cmdk-ask-empty{color:var(--text-3);font-size:13px;font-style:italic}
 .cmdk-ask-done{color:var(--success,#2ecc71);font-size:13px;font-weight:500}
+.cmdk-ask-answer{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:var(--r-sm,8px);background:var(--bg-1);border:1px solid var(--border-subtle)}
+.cmdk-ask-answer-body{color:var(--text-1);font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.cmdk-ask-answer-foot{color:var(--text-3);font-size:11px;letter-spacing:.2px}
 
 /* Source badge + bulk-destructive warning inside the pending-ops preview */
 .pending-source-badge{
