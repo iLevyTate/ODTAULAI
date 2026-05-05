@@ -267,9 +267,44 @@ function swReset(){
 }
 
 // ========== QUICK TIMERS ==========
+// Hard cap on total quick timers. Each one carries scheduled audio nodes,
+// per-timer fire-count maps, a render row, and a slice of the global tick.
+// 30 is well past the practical ceiling and keeps the panel responsive.
+const QT_MAX = 30;
+// Auto-prune the oldest finished quick timer when the cap would be exceeded
+// by a new addition. Returns the count pruned (used for the toast message).
+function _pruneFinishedQuickTimers(){
+  if(quickTimers.length < QT_MAX) return 0;
+  const finished = quickTimers.filter(qt => qt.finished);
+  if(!finished.length) return 0;
+  // Drop the oldest (lowest id == earliest creation) until back under cap.
+  finished.sort((a,b) => a.id - b.id);
+  let pruned = 0;
+  while(quickTimers.length >= QT_MAX && finished.length){
+    const drop = finished.shift();
+    cancelQtAudio(drop);
+    quickTimers = quickTimers.filter(qt => qt.id !== drop.id);
+    pruned += 1;
+  }
+  return pruned;
+}
 function addQuickTimer(){
   const mins=parseInt(gid('qtMin').value)||0,secs=parseInt(gid('qtSec').value)||0,total=mins*60+secs;
   if(total<=0)return;
+  // Respect the cap. If we can free room by pruning finished timers, do so
+  // silently. Otherwise refuse with a toast — better than letting an
+  // unbounded list quietly degrade the panel.
+  if(quickTimers.length >= QT_MAX){
+    const pruned = _pruneFinishedQuickTimers();
+    if(quickTimers.length >= QT_MAX){
+      if(typeof showExportToast === 'function'){
+        showExportToast('Quick-timer cap reached (' + QT_MAX + '). Remove or finish one before adding another.');
+      }
+      return;
+    } else if(pruned > 0 && typeof showExportToast === 'function'){
+      showExportToast('Pruned ' + pruned + ' finished timer' + (pruned === 1 ? '' : 's') + ' to make room.');
+    }
+  }
   const label=(gid('qtLabel').value||'').trim()||'Timer '+fmt(total);
   const sound=gid('qtSound').value;
   quickTimers.push({id:++qtIdCtr,label,totalSec:total,remaining:total,running:false,startedAt:0,pausedRem:total,sound,finished:false,_fireCounts:{}});
@@ -338,17 +373,25 @@ function scheduleQtAudio(qt){
       qt._nodes.push(o);
     });
     qt._audioScheduled=true;
-    // Pre-schedule 'quick'-target repeating-chime intervals during this run
+    // Pre-schedule 'quick'-target repeating-chime intervals during this run.
+    // Capped at a 90-minute look-ahead so a long timer with a short interval
+    // doesn't allocate hundreds of oscillators up front. The _bgQuickTick /
+    // ensureQuickTick path catches up any chimes past the horizon by firing
+    // them via playChime() at runtime. This bounds the AudioContext node
+    // count regardless of timer duration.
     qt._intervalNodes=qt._intervalNodes||[];
     const totalEl=qt.totalSec-qt.remaining;
+    const QT_AUDIO_HORIZON_SEC = 5400; // 90 minutes
     intervals.forEach(iv=>{
       if(iv.intervalSec<=0)return;
       if((iv.target||'pomo')!=='quick')return;
       const alreadyFired=(qt._fireCounts&&qt._fireCounts[iv.id])||0;
       const ic=CH[iv.chime]||CH.bell;
+      const horizon = Math.min(qt.remaining, QT_AUDIO_HORIZON_SEC);
       for(let n=alreadyFired+1;n*iv.intervalSec<qt.totalSec;n++){
         const d=n*iv.intervalSec-totalEl;
         if(d<=0||d>=qt.remaining)continue;
+        if(d>=horizon)break;
         const ibase=x.currentTime+d;
         ic.freq.forEach((f,i)=>{
           const o=x.createOscillator(),g=x.createGain(),t=ibase+i*.05;
