@@ -1,6 +1,6 @@
 // ========== CONFIG ==========
 function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(getTimerState()==='idle'){setPhaseTime();renderTimerChrome()}saveState('user')}
-function toggleOpt(id){const el=gid(id);el.classList.toggle('on');const on=el.classList.contains('on');el.setAttribute('aria-checked',on?'true':'false');if(id==='togBreak')cfg.autoBreak=on;if(id==='togWork')cfg.autoWork=on;if(id==='togSound'){cfg.sound=on;if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=on;if(id==='togNotif'){cfg.notif=on;if(cfg.notif)reqNotifPerm()}if(id==='togSnpNote')cfg.askSessionNote=on;saveState('user')}
+function toggleOpt(id){const el=gid(id);el.classList.toggle('on');const on=el.classList.contains('on');el.setAttribute('aria-checked',on?'true':'false');if(id==='togBreak')cfg.autoBreak=on;if(id==='togWork')cfg.autoWork=on;if(id==='togSound'){cfg.sound=on;if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=on;if(id==='togNotif'){cfg.notif=on;if(cfg.notif){reqNotifPerm().then(()=>{ if(typeof renderNotifStatus==='function') renderNotifStatus(); })}else{ if(typeof renderNotifStatus==='function') renderNotifStatus(); }}if(id==='togSnpNote')cfg.askSessionNote=on;saveState('user')}
 // Settings is now a regular tab page. The legacy `settingsOpen` flag and
 // `toggleSettings()` accordion are kept as no-ops for back-compat with any
 // callers (Cmd+K, deep-links) until those are migrated.
@@ -109,9 +109,9 @@ function _mkBtn(cls,label,handler){const b=document.createElement('button');b.cl
 function renderCtrls(){
   const c=gid('ctrls');c.textContent='';
   if(!running&&!finished&&remaining===totalDuration){c.appendChild(_mkBtn('btn btn-primary','Start',startTimer))}
-  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
-  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
-  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
+  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-skip','↻ Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','↻ Cycle',resetAll))}
+  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-skip','↻ Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','↻ Cycle',resetAll))}
+  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-skip','↻ Phase',resetPhase));c.appendChild(_mkBtn('btn-danger','↻ Cycle',resetAll))}
 }
 
 // Sync ring visual state with running status (for pulse animation)
@@ -211,6 +211,17 @@ function skipPhase(){
   else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500);
 }
 function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState('user')}
+// Reset only the current phase (work, short, long) back to its full duration
+// without disturbing the cycle position, the running phase, or other phases'
+// progress. Time already worked this phase is folded back into the linked
+// active task so it isn't lost.
+function resetPhase(){
+  running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();fireCounts={};
+  if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}
+  setPhaseTime();renderTimerChrome();renderCtrls();_syncRingState();saveState('user');
+  if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
+}
+window.resetPhase=resetPhase;
 
 // ========== STOPWATCH ==========
 function swToggle(){
@@ -256,9 +267,44 @@ function swReset(){
 }
 
 // ========== QUICK TIMERS ==========
+// Hard cap on total quick timers. Each one carries scheduled audio nodes,
+// per-timer fire-count maps, a render row, and a slice of the global tick.
+// 30 is well past the practical ceiling and keeps the panel responsive.
+const QT_MAX = 30;
+// Auto-prune the oldest finished quick timer when the cap would be exceeded
+// by a new addition. Returns the count pruned (used for the toast message).
+function _pruneFinishedQuickTimers(){
+  if(quickTimers.length < QT_MAX) return 0;
+  const finished = quickTimers.filter(qt => qt.finished);
+  if(!finished.length) return 0;
+  // Drop the oldest (lowest id == earliest creation) until back under cap.
+  finished.sort((a,b) => a.id - b.id);
+  let pruned = 0;
+  while(quickTimers.length >= QT_MAX && finished.length){
+    const drop = finished.shift();
+    cancelQtAudio(drop);
+    quickTimers = quickTimers.filter(qt => qt.id !== drop.id);
+    pruned += 1;
+  }
+  return pruned;
+}
 function addQuickTimer(){
   const mins=parseInt(gid('qtMin').value)||0,secs=parseInt(gid('qtSec').value)||0,total=mins*60+secs;
   if(total<=0)return;
+  // Respect the cap. If we can free room by pruning finished timers, do so
+  // silently. Otherwise refuse with a toast — better than letting an
+  // unbounded list quietly degrade the panel.
+  if(quickTimers.length >= QT_MAX){
+    const pruned = _pruneFinishedQuickTimers();
+    if(quickTimers.length >= QT_MAX){
+      if(typeof showExportToast === 'function'){
+        showExportToast('Quick-timer cap reached (' + QT_MAX + '). Remove or finish one before adding another.');
+      }
+      return;
+    } else if(pruned > 0 && typeof showExportToast === 'function'){
+      showExportToast('Pruned ' + pruned + ' finished timer' + (pruned === 1 ? '' : 's') + ' to make room.');
+    }
+  }
   const label=(gid('qtLabel').value||'').trim()||'Timer '+fmt(total);
   const sound=gid('qtSound').value;
   quickTimers.push({id:++qtIdCtr,label,totalSec:total,remaining:total,running:false,startedAt:0,pausedRem:total,sound,finished:false,_fireCounts:{}});
@@ -327,17 +373,25 @@ function scheduleQtAudio(qt){
       qt._nodes.push(o);
     });
     qt._audioScheduled=true;
-    // Pre-schedule 'quick'-target repeating-chime intervals during this run
+    // Pre-schedule 'quick'-target repeating-chime intervals during this run.
+    // Capped at a 90-minute look-ahead so a long timer with a short interval
+    // doesn't allocate hundreds of oscillators up front. The _bgQuickTick /
+    // ensureQuickTick path catches up any chimes past the horizon by firing
+    // them via playChime() at runtime. This bounds the AudioContext node
+    // count regardless of timer duration.
     qt._intervalNodes=qt._intervalNodes||[];
     const totalEl=qt.totalSec-qt.remaining;
+    const QT_AUDIO_HORIZON_SEC = 5400; // 90 minutes
     intervals.forEach(iv=>{
       if(iv.intervalSec<=0)return;
       if((iv.target||'pomo')!=='quick')return;
       const alreadyFired=(qt._fireCounts&&qt._fireCounts[iv.id])||0;
       const ic=CH[iv.chime]||CH.bell;
+      const horizon = Math.min(qt.remaining, QT_AUDIO_HORIZON_SEC);
       for(let n=alreadyFired+1;n*iv.intervalSec<qt.totalSec;n++){
         const d=n*iv.intervalSec-totalEl;
         if(d<=0||d>=qt.remaining)continue;
+        if(d>=horizon)break;
         const ibase=x.currentTime+d;
         ic.freq.forEach((f,i)=>{
           const o=x.createOscillator(),g=x.createGain(),t=ibase+i*.05;

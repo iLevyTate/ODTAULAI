@@ -125,6 +125,25 @@ function refreshParetoTopSet(){
 function isParetoTop(id){return _paretoTopSet.has(id)}
 function getImpactScore(id){return _paretoScoreMap.get(id)||0}
 
+// Create a recurring task from a one-click empty-state template. Mirrors the
+// shape of addTask() (push + index + save + render) without going through the
+// quick-add parser, so the template's recur value is the canonical source.
+function addHabitFromTemplate(name, recur){
+  if(!name || !recur) return;
+  ensureDefaultList();
+  const t = Object.assign(
+    { id: ++taskIdCtr, name, totalSec:0, sessions:0, created: timeNowFull(), parentId:null, collapsed:false },
+    defaultTaskProps(),
+    { recur, dueDate: todayISO() }
+  );
+  tasks.push(t);
+  if(typeof _taskIndexRegister === 'function') _taskIndexRegister(t);
+  if(typeof saveState === 'function') saveState('user');
+  if(typeof renderTaskList === 'function') renderTaskList();
+  if(typeof openTaskDetail === 'function') openTaskDetail(t.id);
+}
+window.addHabitFromTemplate = addHabitFromTemplate;
+
 function defaultTaskProps(){return{
   status:'open',priority:'none',tags:[],dueDate:null,startDate:null,
   estimateMin:0,description:'',starred:false,completedAt:null,
@@ -673,6 +692,22 @@ function findTask(id){
 
 // Tree helpers
 function getTaskChildren(parentId){return tasks.filter(t=>(t.parentId||null)===parentId)}
+// Whether a child task may render as part of a parent subtree the user has
+// already expanded into. The parent passed the smart-view filter; the child
+// may not have, but it should still appear so the user sees the complete
+// tree. Two hard exceptions remain so users can't accidentally surface
+// items they explicitly removed from view:
+//   - Archived children stay hidden unless we're explicitly in archive view.
+//   - hiddenUntil-snoozed children stay hidden unless we're in snooze view.
+function _subtaskAllowedUnderShownParent(t){
+  if(!t) return false;
+  const today = (typeof todayISO === 'function') ? todayISO() : null;
+  if(t.archived && smartView !== 'archived') return false;
+  if(today && t.hiddenUntil && t.hiddenUntil > today
+     && smartView !== 'snoozed' && smartView !== 'archived'
+     && smartView !== 'completed') return false;
+  return true;
+}
 function hasChildren(taskId){return tasks.some(t=>t.parentId===taskId)}
 function getTaskDescendantIds(taskId){
   const result=[],seen=new Set(),queue=[taskId];
@@ -1783,7 +1818,15 @@ function renderSmartViewCounts(){
   set('svcStuck',visibleNow.filter(t=>typeof t.lastModified==='number'&&t.lastModified>0&&t.lastModified<stuckCutoff).length);
   set('svcSnoozed',activeNotDone.filter(t=>t.hiddenUntil&&t.hiddenUntil>today).length);
   set('svcCompleted',active.filter(t=>t.status==='done').length);
-  set('svcArchived',tasks.filter(t=>t.archived&&inList(t)).length);
+  const archivedCount=tasks.filter(t=>t.archived&&inList(t)).length;
+  set('svcArchived',archivedCount);
+  // Pin the Archive chip in the collapsed smart-views bar whenever the
+  // archive is non-empty — otherwise the only entry point is the All-views
+  // expander, which a first-time user has no reason to discover.
+  const archChip=document.querySelector('.sv-chip[data-view="archived"]');
+  if(archChip) archChip.classList.toggle('sv-chip-pinned', archivedCount>0);
+  const doneChip=document.querySelector('.sv-chip[data-view="completed"]');
+  if(doneChip) doneChip.classList.toggle('sv-chip-pinned', (active.filter(t=>t.status==='done').length)>0);
 }
 
 // Main render (list view)
@@ -1847,10 +1890,64 @@ function renderTaskList(){
       empty.appendChild(buildIcon('archive'));
       addBlock('task-empty-title', 'Archive is empty');
       addBlock('task-empty-help',  'Archived tasks will appear here when you archive them from the menu.');
+    } else if(smartView==='habits'){
+      empty.appendChild(buildIcon('refresh'));
+      addBlock('task-empty-title', 'No recurring tasks yet');
+      addBlock('task-empty-help',  'Habits and daily check-ins repeat on a schedule and reappear after each completion.');
+      const row=document.createElement('div');
+      row.className='habit-template-row';
+      const tmpls=[
+        {label:'+ Daily check-in',name:'Daily check-in',recur:'daily'},
+        {label:'+ Weekly review',name:'Weekly review',recur:'weekly'},
+        {label:'+ Weekday habit',name:'New weekday habit',recur:'weekdays'},
+      ];
+      tmpls.forEach(tm=>{
+        const b=document.createElement('button');
+        b.type='button';
+        b.className='first-task-btn habit-template-btn';
+        b.textContent=tm.label;
+        b.onclick=()=>{ if(typeof addHabitFromTemplate==='function') addHabitFromTemplate(tm.name,tm.recur); };
+        row.appendChild(b);
+      });
+      empty.appendChild(row);
+      addBlock('task-empty-tip', 'Or type any task with "daily" / "every weekday" / "weekly" — the parser will set recurrence automatically.');
     } else {
       const mod = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'') ? '⌘' : 'Ctrl';
       empty.appendChild(buildIcon('sparkles'));
       addBlock('task-empty-title', 'No tasks yet');
+      // First-run welcome card (only on truly first launch — once we've ever
+      // seen tasks, this short tour is just noise). The flag is persistent
+      // across sessions so re-emptying the list later doesn't re-show it.
+      try{
+        const seen = localStorage.getItem('stupind_welcomed') === '1';
+        if(!seen){
+          const w = document.createElement('div');
+          w.className = 'task-empty-welcome';
+          const h = document.createElement('div');
+          h.className = 'task-empty-welcome-title';
+          h.textContent = 'Welcome to OdTauLai';
+          w.appendChild(h);
+          const ul = document.createElement('ul');
+          ul.className = 'task-empty-welcome-list';
+          [
+            ['Type a task above. Words like "tomorrow", "@urgent", "#tag", "!star" parse automatically.'],
+            [`Press ${mod}+K for the command palette and Ask — works fully offline once the on-device model is loaded.`],
+            ['Click chips inside a task (priority, effort, category…) — they save instantly, no Save button needed.'],
+            ['Open Settings → AI to download the on-device language model. Everything stays on your device.'],
+          ].forEach(([t]) => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+          w.appendChild(ul);
+          const dismiss = document.createElement('button');
+          dismiss.type = 'button';
+          dismiss.className = 'task-empty-welcome-dismiss';
+          dismiss.textContent = 'Got it';
+          dismiss.onclick = () => {
+            try{ localStorage.setItem('stupind_welcomed', '1'); }catch(_){}
+            w.remove();
+          };
+          w.appendChild(dismiss);
+          empty.appendChild(w);
+        }
+      }catch(_){ /* localStorage disabled — skip the welcome card silently */ }
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'first-task-btn';
@@ -1891,18 +1988,27 @@ function renderTaskList(){
     if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
     return;
   }
-  function renderNode(parentId,depth){
+  function renderNode(parentId,depth,inShownSubtree){
     const children=getTaskChildren(parentId);
     const sorted=sortTasks(children);
     sorted.forEach(t=>{
-      if(visibleIds.has(t.id)||hasVisibleDescendant(t.id,visibleIds)){
+      const selfMatch=visibleIds.has(t.id);
+      const descMatch=hasVisibleDescendant(t.id,visibleIds);
+      // Once an ancestor matched the filter we render its whole subtree
+      // regardless of per-task filter status — otherwise expanding a parent
+      // and missing half its subtasks (e.g. completed children in an "active"
+      // smart view) reads as "subtasks not appearing." Archived/snoozed
+      // tasks still respect global hide-rules so users can't accidentally
+      // resurrect deleted-feeling items.
+      const includeFromAncestor = inShownSubtree && _subtaskAllowedUnderShownParent(t);
+      if(selfMatch||descMatch||includeFromAncestor){
         renderTaskItem(t,depth);
         if(subtaskPromptParent===t.id)renderSubtaskForm(t.id,depth+1);
-        if(!t.collapsed)renderNode(t.id,depth+1);
+        if(!t.collapsed)renderNode(t.id,depth+1,inShownSubtree||selfMatch||descMatch);
       }
     });
   }
-  renderNode(null,0);
+  renderNode(null,0,false);
   // Long-list affordance: show/hide the scroll-progress bar once DOM commits.
   if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
 }
@@ -1973,11 +2079,16 @@ function renderGroupedTasks(visibleTasks){
     if(!isCol){
       items.forEach(t=>{
         renderTaskItem(t,0);
-        // Show descendants inline (no further grouping) if not collapsed
+        // Show descendants inline (no further grouping) if not collapsed.
+        // Once we render a parent at the group level, render its whole
+        // subtree — matching the tree-mode rule above. visibleSet is still
+        // consulted for "self matched filter," but a non-matching subtask
+        // under a visible parent is included so the user sees the complete
+        // tree they expanded into.
         if(!t.collapsed){
           function renderKids(pid,depth){
             getTaskChildren(pid).forEach(c=>{
-              if(!visibleSet.has(c.id)) return;
+              if(!_subtaskAllowedUnderShownParent(c)) return;
               renderTaskItem(c,depth);
               if(!c.collapsed) renderKids(c.id, depth+1);
             });
@@ -2062,6 +2173,14 @@ function _initTaskListSortable(){
     forceFallback: false,
     fallbackOnBody: true,
     swapThreshold: 0.65,
+    // Auto-scroll while dragging near the top/bottom edges. Sortable's
+    // built-in scroll handler is window-scoped (good — task list lives in
+    // the document body for our layout). Without this, dragging across a
+    // long list required releasing, scrolling, re-grabbing.
+    scroll: true,
+    scrollSensitivity: 80,
+    scrollSpeed: 14,
+    bubbleScroll: true,
     onEnd: function(evt){
       // Read new DOM order, persist as t.order. Force manual sort so the
       // user-driven order survives across renders that would otherwise

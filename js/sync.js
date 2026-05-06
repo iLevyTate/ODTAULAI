@@ -21,6 +21,14 @@ let _myRoomCode  = null;
 let _lastSyncAt  = null;
 let _connectTimeoutId = null;
 let _pendingInboundConn = null;
+// Auto-reconnect state. Sync used to set status='error' on socket-closed and
+// stop, leaving the user stuck. Now we remember the target code, schedule a
+// retry with exponential backoff (2s, 4s, 8s, 16s, 30s), and stop after the
+// fifth attempt — at which point the user can manually click Reconnect.
+let _lastConnectCode    = null;
+let _reconnectAttempt   = 0;
+let _reconnectTimerId   = null;
+const SYNC_RECONNECT_BACKOFFS_MS = [2000, 4000, 8000, 16000, 30000];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -375,6 +383,10 @@ function _wireConn(conn) {
 
   conn.on('open', () => {
     _setSyncStatus('connected');
+    // Successful connect — clear any pending reconnect timer and reset
+    // the attempt counter so a future drop gets the full backoff schedule.
+    if(_reconnectTimerId){ clearTimeout(_reconnectTimerId); _reconnectTimerId = null; }
+    _reconnectAttempt = 0;
     // Exchange state on connect
     try { conn.send({ type: 'state', payload: _packState() }); } catch(e) { console.warn('[Sync] send state', e); }
     // Persist the room code we connected to
@@ -396,7 +408,10 @@ function _wireConn(conn) {
     _conn = null;
     // Don't stomp on a more-specific error message (e.g. "Code not found")
     // that we just set from _peer.on('error', 'peer-unavailable').
-    if (_syncStatus !== 'error') _setSyncStatus('waiting');
+    if (_syncStatus !== 'error' && _syncStatus !== 'connected') _setSyncStatus('waiting');
+    // Connection went down. If the user didn't disconnect intentionally,
+    // schedule an auto-reconnect with backoff.
+    if (_lastConnectCode) _scheduleSyncReconnect();
   });
 
   conn.on('error', (err) => {
@@ -404,6 +419,7 @@ function _wireConn(conn) {
     _conn = null;
     if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
     _setSyncStatus('error', (err && (err.type || err.message)) || 'Connection failed');
+    if (_lastConnectCode) _scheduleSyncReconnect();
   });
 }
 
@@ -510,7 +526,14 @@ async function syncInit() {
       return;
     }
     if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed') {
-      _setSyncStatus('error', 'Lost connection to matchmaking server — check internet');
+      // Schedule an automatic reconnect with backoff. _lastConnectCode is set
+      // by syncConnect; if absent the user never paired and we just surface
+      // the error and wait for them to act.
+      if(_lastConnectCode){
+        _scheduleSyncReconnect();
+      } else {
+        _setSyncStatus('error', 'Lost connection to matchmaking server — check internet');
+      }
       return;
     }
     if (t === 'browser-incompatible') {
@@ -526,6 +549,43 @@ async function syncInit() {
   });
 }
 
+// Schedule the next auto-reconnect attempt. Uses a fresh `setTimeout` so the
+// existing _connectTimeoutId logic isn't disturbed. After the final backoff
+// we hold at error and wait for the user — five failed attempts almost
+// always means the broker, the user's WiFi, or the peer is gone.
+function _scheduleSyncReconnect(){
+  if(_reconnectTimerId){ clearTimeout(_reconnectTimerId); _reconnectTimerId = null; }
+  if(!_lastConnectCode || !_syncEnabled){
+    _setSyncStatus('error', 'Lost connection — Reconnect to retry');
+    return;
+  }
+  if(_reconnectAttempt >= SYNC_RECONNECT_BACKOFFS_MS.length){
+    _setSyncStatus('error', 'Reconnect failed after ' + SYNC_RECONNECT_BACKOFFS_MS.length + ' attempts — try Reconnect manually');
+    return;
+  }
+  const wait = SYNC_RECONNECT_BACKOFFS_MS[_reconnectAttempt];
+  _reconnectAttempt += 1;
+  _setSyncStatus('error', 'Reconnecting in ' + Math.round(wait/1000) + 's (attempt ' + _reconnectAttempt + '/' + SYNC_RECONNECT_BACKOFFS_MS.length + ')');
+  _reconnectTimerId = setTimeout(() => {
+    _reconnectTimerId = null;
+    if(!_syncEnabled || !_lastConnectCode) return;
+    _setSyncStatus('connecting', 'Reconnecting (attempt ' + _reconnectAttempt + '/' + SYNC_RECONNECT_BACKOFFS_MS.length + ')…');
+    try { syncConnect(_lastConnectCode); }
+    catch(e){ console.warn('[Sync] reconnect failed', e); _scheduleSyncReconnect(); }
+  }, wait);
+}
+// Manual "Reconnect now" — user clicked the button. Cancels any pending
+// backoff and tries immediately. Resets the attempt counter so the user
+// gets a full set of backoffs again if they ask for one.
+function syncReconnectNow(){
+  if(_reconnectTimerId){ clearTimeout(_reconnectTimerId); _reconnectTimerId = null; }
+  _reconnectAttempt = 0;
+  if(_lastConnectCode){
+    _setSyncStatus('connecting', 'Reconnecting…');
+    try { syncConnect(_lastConnectCode); } catch(e){ console.warn('[Sync] reconnect failed', e); }
+  }
+}
+
 function syncConnect(code) {
   if (!_peer) { syncInit().then(() => syncConnect(code)).catch(e => console.warn('[Sync] init failed', e)); return; }
   if (!_isValidCode(code)) {
@@ -537,6 +597,9 @@ function syncConnect(code) {
     _setSyncStatus('error', "That's this device's own code");
     return;
   }
+  // Remember the code so we can re-establish on socket-closed without
+  // requiring the user to retype it. Cleared on syncDisconnect.
+  _lastConnectCode = code;
   _setSyncStatus('connecting');
 
   // If we have a stale dead connection, drop it before making a new one.
@@ -584,12 +647,20 @@ function syncRegenerateCode() {
 
 function syncDisconnect() {
   if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
+  // Cancel any pending reconnect and forget the last target — disconnect is
+  // an intentional teardown, not a transient failure.
+  if (_reconnectTimerId) { clearTimeout(_reconnectTimerId); _reconnectTimerId = null; }
+  _reconnectAttempt = 0;
+  _lastConnectCode = null;
   if (_conn) { try { _conn.close(); } catch(e) { console.warn('[Sync] conn close', e); } _conn = null; }
   if (_peer) { try { _peer.destroy(); } catch(e) { console.warn('[Sync] peer destroy', e); } _peer = null; }
   try { localStorage.removeItem(SYNC_ROOM_KEY); } catch(e) { /* LS fire-and-forget */ }
   _setSyncStatus('off');
   _syncEnabled = false;
   renderSyncPanel();
+}
+if(typeof window !== 'undefined'){
+  window.syncReconnectNow = syncReconnectNow;
 }
 
 // Graceful cleanup on tab close — tells PeerJS server to release our ID
@@ -661,8 +732,20 @@ function renderSyncPanel() {
         </div>
         <div class="sync-input-hint" id="syncInputHint">Enter the 6-character code shown on the other device (e.g. <code>STU-AB3-C9D</code>).</div>
       </div>
+      <div class="sync-action-row" id="syncActionRow"></div>
       <button class="btn-ghost btn-sm sync-disable" data-action="syncDisconnect">Disable sync</button>
     </div>`;
+  // Show "Reconnect now" inline whenever we have a remembered target and
+  // we're either in error or in connecting+backoff. Lets the user skip the
+  // wait without having to retype the pairing code.
+  const actionRow = document.getElementById('syncActionRow');
+  if(actionRow){
+    if(_lastConnectCode && (_syncStatus === 'error' || _reconnectTimerId)){
+      actionRow.innerHTML = '<button class="btn-primary btn-sm" data-action="syncReconnectNow">Reconnect now</button>';
+    } else {
+      actionRow.innerHTML = '';
+    }
+  }
 
   _setSyncStatus(_syncStatus);
 }

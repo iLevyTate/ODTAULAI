@@ -99,11 +99,19 @@ test('askRun: rejected-everything does not push history but still returns ok', a
   assert.equal(res.rejected.length, 1);
 });
 
-test('askRun: parse failure bubbles up as PARSE_FAILED', async () => {
+test('askRun: prose-only response surfaces as chatAnswer (free-form chat)', async () => {
+  // Prior behavior: anything that isn't a JSON ops array returned
+  // PARSE_FAILED, and the UI showed "Couldn't parse a valid plan." That made
+  // free-form questions ("what's overdue?", "summarize my week") feel
+  // broken — the user got a perfectly good prose answer that was thrown
+  // away. The new contract: when the model produces only prose, return
+  // ok:true with no ops and the cleaned text as chatAnswer so the UI can
+  // render it as a chat reply.
   const { win } = mkSandbox({ tasks: [], genResponse: 'Sorry, I cannot help with that.' });
   const res = await win.askRun('make something urgent', {});
-  assert.equal(res.ok, false);
-  assert.match(res.reason, /^PARSE_FAILED/);
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.ops, []);
+  assert.ok(res.chatAnswer && /cannot help/i.test(res.chatAnswer));
 });
 
 test('askRun: empty query short-circuits with EMPTY_QUERY', async () => {

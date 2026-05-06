@@ -287,6 +287,13 @@
      toggle, so the legacy max-height accordion is opted out via this class. */
   .sbody.sbody-static{overflow:visible;max-height:none!important;transition:none}
   .srow{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  .srow--full{display:block}
+  .notif-status{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;border-radius:var(--r-sm);font-size:12px;line-height:1.45}
+  .notif-status--ok{background:color-mix(in srgb, var(--success) 12%, transparent);border:1px solid color-mix(in srgb, var(--success) 30%, transparent);color:var(--text-1)}
+  .notif-status--warn{background:color-mix(in srgb, var(--warning) 12%, transparent);border:1px solid color-mix(in srgb, var(--warning) 30%, transparent);color:var(--text-1)}
+  .notif-status--err{background:color-mix(in srgb, var(--danger) 10%, transparent);border:1px solid color-mix(in srgb, var(--danger) 28%, transparent);color:var(--text-1)}
+  .notif-status-btn{flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer}
+  .notif-status-btn:hover{background:var(--accent);color:var(--bg-0)}
   .sr-lbl{font-size:10px;color:#6a8aaa;letter-spacing:1px;min-width:120px}
   .sinput{width:56px;padding:6px 8px;background:#0d1a28;border:1px solid #1a2840;border-radius:6px;color:#c8d6e5;font-size:13px;font-family:inherit;text-align:center;outline:0}
   select.sinput{width:auto;min-width:100px;text-align:left;padding-right:24px;text-overflow:ellipsis}
@@ -543,7 +550,7 @@
   .smart-views{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;padding:4px;background:#0a1320;border-radius:10px;border:1px solid #152238;align-items:center}
   /* Collapsed: only the active chip + toggle remain visible. Hides the rest
      instead of unmounting them so counts (#svcXxx) stay live & queryable. */
-  .smart-views--collapsed .sv-chip:not(.active){display:none}
+  .smart-views--collapsed .sv-chip:not(.active):not(.sv-chip-pinned){display:none}
   .sv-toggle{
     display:inline-flex;align-items:center;gap:4px;
     padding:7px 10px;border-radius:7px;border:1px dashed var(--border,#2a3a52);
@@ -778,6 +785,17 @@
   .ai-chip-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;clip-path:inset(50%)}
   .sys-info-ok{color:var(--success)}
   .sys-info-warn{color:var(--warning)}
+  .install-help-panel{margin-top:10px;padding:12px 14px;border-radius:var(--r-sm);background:var(--bg-1);border:1px solid var(--border-subtle);font-size:13px;color:var(--text-1)}
+  .install-help-title{font-weight:600;margin-bottom:6px;color:var(--text-1)}
+  .install-help-steps{margin:0 0 8px;padding-left:20px;line-height:1.6;color:var(--text-2)}
+  .install-help-steps li{margin-bottom:2px}
+  .install-help-close{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-2);font-size:12px;cursor:pointer}
+  .install-help-close:hover{background:var(--bg-2);color:var(--text-1)}
+  .sw-precache-banner{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;margin-bottom:10px;border-radius:var(--r-sm);background:color-mix(in srgb, var(--warning) 12%, transparent);border:1px solid color-mix(in srgb, var(--warning) 35%, transparent);font-size:12px;color:var(--text-1);flex-wrap:wrap}
+  .sw-precache-banner-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--warning);background:transparent;color:var(--warning);font-size:11px;font-weight:600;cursor:pointer}
+  .sw-precache-banner-btn:hover{background:var(--warning);color:var(--bg-0)}
+  .sw-precache-banner-btn--ghost{border-color:var(--border);color:var(--text-3)}
+  .sw-precache-banner-btn--ghost:hover{background:var(--bg-2);color:var(--text-1)}
 
   /* Main timer card — inside Focus tab panel */
   .card{padding:24px;border-radius:var(--r-md);display:flex;flex-direction:column;align-items:center;gap:18px}
@@ -1286,6 +1304,10 @@
   .done-sparkle{position:absolute;pointer-events:none;font-size:18px;animation:confetti .6s ease-out forwards}
 
   /* Calendar view */
+  .cal-feed-alert{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;padding:8px 12px;border-radius:var(--r-sm);background:color-mix(in srgb, var(--warning) 12%, transparent);border:1px solid color-mix(in srgb, var(--warning) 35%, transparent);font-size:12px}
+  .cal-feed-alert-msg{color:var(--text-1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cal-feed-alert-btn{flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid var(--warning);background:transparent;color:var(--warning);font-size:11px;font-weight:600;cursor:pointer}
+  .cal-feed-alert-btn:hover{background:var(--warning);color:var(--bg-0)}
   .calendar{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px}
   .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px}
   .cal-title{font-size:16px;font-weight:700;color:var(--text-1);flex:1;text-align:center}
@@ -2695,6 +2717,7 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   font-family:inherit;cursor:pointer;
 }
 .quota-warning button:hover{background:rgba(255,255,255,.3)}
+.quota-warning--proactive{background:rgba(230,126,34,.95);box-shadow:0 10px 40px rgba(230,126,34,.35);flex-wrap:wrap}
 
 /* Mobile tweaks */
 @media (max-width:640px){
@@ -3362,6 +3385,14 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .cmdk-ask-error button{margin-left:8px;vertical-align:middle}
 .cmdk-ask-empty{color:var(--text-3);font-size:13px;font-style:italic}
 .cmdk-ask-done{color:var(--success,#2ecc71);font-size:13px;font-weight:500}
+.cmdk-ask-answer{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:var(--r-sm,8px);background:var(--bg-1);border:1px solid var(--border-subtle)}
+.cmdk-ask-answer-body{color:var(--text-1);font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.cmdk-ask-answer-foot{color:var(--text-3);font-size:11px;letter-spacing:.2px}
+.cmdk-ask-rejected{margin-top:8px;border:1px solid var(--border-subtle);border-radius:var(--r-sm,8px);background:var(--bg-1);padding:6px 10px}
+.cmdk-ask-rejected summary{cursor:pointer;color:var(--warning);font-size:12px;font-weight:500}
+.cmdk-ask-rejected-list{margin:6px 0 0;padding-left:18px;color:var(--text-2);font-size:12px;line-height:1.55}
+.cmdk-ask-rejected-list li{word-break:break-word}
+.cmdk-ask-rejected-more{font-style:italic;color:var(--text-3)}
 
 /* Source badge + bulk-destructive warning inside the pending-ops preview */
 .pending-source-badge{
@@ -3496,6 +3527,8 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 }
 .first-task-btn:hover{filter:brightness(1.08);background:var(--accent);color:var(--bg-0);border-color:var(--accent)}
 .first-task-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.habit-template-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:var(--space-3) 0}
+.habit-template-row .habit-template-btn{margin:0;padding:8px 14px;font-size:var(--fs-12)}
 
 /* Empty-state internal layout — class-driven so it stays theme-aware and
    token-consistent across views (no-tasks-yet / no-filter-match / archive). */
@@ -3506,6 +3539,13 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   font-size:28px;
 }
 .task-empty-icon .ui-ic{width:32px;height:32px}
+.task-empty-welcome{margin:14px auto 16px;max-width:520px;text-align:left;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);padding:14px 18px}
+.task-empty-welcome-title{font-weight:700;color:var(--text-1);margin-bottom:8px;font-size:14px}
+.task-empty-welcome-list{margin:0 0 10px;padding-left:18px;color:var(--text-2);font-size:13px;line-height:1.6}
+.task-empty-welcome-list li{margin-bottom:4px}
+.task-empty-welcome-dismiss{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-2);font-size:12px;cursor:pointer}
+.task-empty-welcome-dismiss:hover{background:var(--bg-2);color:var(--text-1)}
+.stats-empty-hint{margin:8px 0 0;padding:8px 12px;border-radius:var(--r-sm);background:var(--bg-2);color:var(--text-3);font-size:12px;line-height:1.5;text-align:center}
 .task-empty-title{
   font-size:var(--fs-16);font-weight:600;color:var(--text-1);
   margin-block-end:var(--space-3);

@@ -125,6 +125,7 @@ function _showGenLoadRibbonIndeterminate(detail){
 
 /** Set the generative-LLM chip sub-state without affecting embedding state. */
 function syncGenChip(state, msg){
+  const wasReady = _genChipState === 'ready';
   _genChipState = state || 'idle';
   _genChipMsg = msg || '';
   if(_genChipState !== 'loading' && _genChipState !== 'working' && _genChipState !== 'syncing'){
@@ -132,6 +133,20 @@ function syncGenChip(state, msg){
   }
   const c = _composeChipState();
   _renderHeaderAIChip(c.state, c.msg);
+  // If the LLM just transitioned to ready and the Ask sheet is sitting in the
+  // "need-model" empty state, refresh it so the inline Download button is
+  // replaced with a normal idle prompt the user can submit immediately.
+  // Avoids the "I downloaded the model… now what?" dead end.
+  if(_genChipState === 'ready' && !wasReady && typeof document !== 'undefined'){
+    const reply = document.getElementById('cmdkAskReply');
+    if(reply && reply.querySelector('.cmdk-ask-enable')){
+      reply.textContent = '';
+      const ok = document.createElement('div');
+      ok.className = 'cmdk-ask-done';
+      ok.textContent = 'Local AI is ready — type your request and press Enter.';
+      reply.appendChild(ok);
+    }
+  }
 }
 
 /** Header pill: model load / ready / error — visible on every tab */
@@ -935,6 +950,12 @@ function intelRejectPending(){
 async function acceptProposedOps(ops, meta){
   if(Array.isArray(ops) && ops.length > 50){
     console.warn('[ask] Proposed op list truncated from', ops.length, 'to 50');
+    // User-visible signal so they don't silently lose 40% of their request.
+    // showExportToast is the existing toast surface (see ui.js); a quiet
+    // warn alone is invisible to anyone not watching the console.
+    if(typeof showExportToast === 'function'){
+      showExportToast('Applied first 50 of ' + ops.length + ' proposed changes — re-run to continue.');
+    }
   }
   const list = Array.isArray(ops) ? ops.slice(0, 50) : [];
   const classifyIdx = [];
@@ -1251,6 +1272,10 @@ async function aiAlign(){
   }catch(err){
     console.warn('[aiAlign]', err);
     _setIntelStatus('error', (err.message || String(err)).slice(0, 80));
+    const msg = (err && err.message) ? String(err.message).slice(0, 120) : 'failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast('Values alignment failed: ' + msg, 'Retry', () => aiAlign());
+    }
   }finally{
     _intelBusy = false;
   }
@@ -1656,6 +1681,10 @@ async function intelFindDuplicatesUI(){
     }).join('');
   }catch(e){
     sec.innerHTML = '<span class="text-danger">Failed to scan</span>';
+    const msg = (e && e.message) ? String(e.message).slice(0, 120) : 'failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast('Find duplicates failed: ' + msg, 'Retry', () => intelFindDuplicatesUI());
+    }
   }
 }
 
@@ -1730,6 +1759,10 @@ async function intelHarmonizeFields(){
   }catch(err){
     console.warn('[harmonize]', err);
     _setIntelStatus('error', 'Harmonize failed');
+    const msg = (err && err.message) ? String(err.message).slice(0, 120) : 'failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast('Harmonize failed: ' + msg, 'Retry', () => intelHarmonizeFields());
+    }
   }finally{
     _intelBusy = false;
   }
@@ -1783,6 +1816,10 @@ async function intelAutoOrganize(){
   }catch(err){
     console.warn('[auto-organize]', err);
     _setIntelStatus('error', 'Auto-organize failed');
+    const msg = (err && err.message) ? String(err.message).slice(0, 120) : 'failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast('Auto-organize failed: ' + msg, 'Retry', () => intelAutoOrganize());
+    }
   }
 }
 
@@ -1839,6 +1876,27 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// Wrap a user-initiated AI feature so failures surface as a toast with the
+// feature label and a Retry action, instead of vanishing into console.warn.
+// Used by: smartAddEnhance, smartAddParseWithLLM, intelFindDuplicatesUI,
+// intelHarmonizeFields, intelAutoOrganize. Background tasks (auto-rehydrate,
+// embed warmup, scheduled centroids) are intentionally NOT wrapped — those
+// failures aren't user-initiated and would only spam the surface.
+async function _aiFeatureGuard(label, fn){
+  try{
+    return await fn();
+  }catch(err){
+    console.warn('[ai:'+label+']', err);
+    const msg = (err && err.message) ? String(err.message).slice(0, 120) : 'failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast(label + ' failed: ' + msg, 'Retry', () => { _aiFeatureGuard(label, fn); });
+    } else if(typeof showExportToast === 'function'){
+      showExportToast(label + ' failed: ' + msg);
+    }
+    return null;
+  }
+}
+
 async function smartAddEnhance(){
   if(typeof isIntelReady !== 'function' || !isIntelReady()){
     _setIntelStatus('error', 'Model still loading — check the AI chip or open Tools');
@@ -1883,7 +1941,12 @@ async function smartAddEnhance(){
       _renderSmartAddChips(cleaned);
     }
   }catch(err){
+    // User clicked Enhance; failure is feedback-worthy.
     console.warn('[smart-add]', err);
+    const msg = (err && err.message) ? String(err.message).slice(0, 120) : 'failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast('Enhance failed: ' + msg, 'Retry', () => smartAddEnhance());
+    }
   }finally{
     _intelBusy = false;
     if(btn){
@@ -1969,7 +2032,14 @@ async function smartAddParseWithLLM(){
       }
     }
   }catch(err){
+    // User clicked the Parse-with-LLM button; surface the failure with a
+    // Retry instead of leaving them staring at a "loading" state that
+    // already cleared.
     console.warn('[smart-add:llm]', err);
+    const msg = (err && err.message) ? String(err.message).slice(0, 120) : 'parse failed';
+    if(typeof showActionToast === 'function'){
+      showActionToast('Parse with LLM failed: ' + msg, 'Retry', () => smartAddParseWithLLM());
+    }
   }finally{
     _intelBusy = false;
     if(btn){
