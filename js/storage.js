@@ -375,8 +375,80 @@ function saveState(reason){
 
   queueMicrotask(() => {
     _queueEmbedEnsure(_intelEmbedIds);
+    // Probe storage usage every ~50 saves so the user gets a heads-up
+    // *before* QuotaExceededError actually fires. The reactive banner
+    // above only kicks in once writes are already failing.
+    _maybeCheckStorageQuota();
   });
 }
+
+// ── Proactive storage quota probe ─────────────────────────────────────────
+// We sample navigator.storage.estimate() on a low cadence (every ~50 saves)
+// to avoid spamming the API. When usage crosses 80% of quota a warning
+// banner appears with Export + Archive options. The banner is one-shot per
+// session — once dismissed it won't re-appear unless usage worsens.
+let _quotaProbeCounter = 0;
+let _lastQuotaProbeAt = 0;
+let _proactiveQuotaShownPct = 0;
+function _maybeCheckStorageQuota(){
+  if(typeof navigator === 'undefined' || !navigator.storage || !navigator.storage.estimate) return;
+  _quotaProbeCounter += 1;
+  // Probe at most every 50 saves AND no more than once every 60s — saves
+  // can fire rapidly during a sync burst and we don't need millisecond
+  // precision on a long-cycle warning.
+  if(_quotaProbeCounter % 50 !== 0) return;
+  const now = Date.now();
+  if(now - _lastQuotaProbeAt < 60_000) return;
+  _lastQuotaProbeAt = now;
+  navigator.storage.estimate().then(est => {
+    if(!est || !est.quota || !est.usage) return;
+    const pct = Math.round((est.usage / est.quota) * 100);
+    // Only re-show if usage has *grown* past a new 5-pct bucket since the
+    // last warning. Prevents reopening the banner the user just dismissed.
+    if(pct < 80) return;
+    if(pct < _proactiveQuotaShownPct + 5) return;
+    _proactiveQuotaShownPct = pct;
+    _renderProactiveQuotaBanner(pct, est.usage, est.quota);
+  }).catch(() => { /* permission/api missing — silent */ });
+}
+function _renderProactiveQuotaBanner(pct, usage, quota){
+  if(typeof document === 'undefined' || !document.body) return;
+  const old = document.getElementById('proactiveQuotaBanner');
+  if(old) old.remove();
+  const fmt = bytes => {
+    if(bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+    if(bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+    if(bytes >= 1e3) return Math.round(bytes / 1e3) + ' KB';
+    return bytes + ' B';
+  };
+  const w = document.createElement('div');
+  w.id = 'proactiveQuotaBanner';
+  w.className = 'quota-warning quota-warning--proactive';
+  const msg = document.createElement('span');
+  msg.className = 'quota-warning-msg';
+  msg.textContent = `⚠ Storage at ${pct}% (${fmt(usage)} of ${fmt(quota)}). Export a backup or clear old archived days before writes start failing.`;
+  w.appendChild(msg);
+  const exportBtn = document.createElement('button');
+  exportBtn.type = 'button';
+  exportBtn.textContent = 'Export backup';
+  exportBtn.onclick = () => { try{ exportData(); }catch(e){} };
+  w.appendChild(exportBtn);
+  const archiveBtn = document.createElement('button');
+  archiveBtn.type = 'button';
+  archiveBtn.textContent = 'Open archive';
+  archiveBtn.onclick = () => {
+    if(typeof setTab === 'function') setTab('data');
+    w.remove();
+  };
+  w.appendChild(archiveBtn);
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.textContent = 'Dismiss';
+  dismiss.onclick = () => w.remove();
+  w.appendChild(dismiss);
+  document.body.appendChild(w);
+}
+if(typeof window !== 'undefined') window._maybeCheckStorageQuota = _maybeCheckStorageQuota;
 
 let _embedEnsureIds=new Set();
 let _embedEnsureT=null;
@@ -436,6 +508,9 @@ function _applyState(s){
       setToggle('togSound', _bool(cfg.sound,true));
       setToggle('togLink',  _bool(cfg.linkTask,true));
       setToggle('togNotif', cfg.notif!==false);
+      // Surface OS-level permission status next to the toggle so users can see
+      // when iOS/denied state is the actual blocker, not their toggle setting.
+      if(typeof renderNotifStatus === 'function') renderNotifStatus();
       setToggle('togSnpNote', cfg.askSessionNote!==false);
       // G-16: restore phase-preset dropdown selection
       const cp=gid('cfgPreset'); if(cp && typeof cfg.phasePreset==='string') cp.value=cfg.phasePreset;
@@ -830,7 +905,7 @@ function exportData(){
 function importData(file){
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = e=>{
+  reader.onload = async e=>{
     try{
       const wrapper = JSON.parse(e.target.result);
       // Support both raw state JSON and wrapped export format
@@ -838,6 +913,16 @@ function importData(file){
       const arch = wrapper.archive;
       const s    = JSON.parse(raw);
       if(!s||!Array.isArray(s.tasks)) throw new Error('Invalid backup file');
+      // Dry-run preview: show counts before replacing live state. Import was
+      // a destructive wholesale-replace with a single alert at the end —
+      // users had no way to confirm what would land, and one wrong file
+      // wiped tasks silently. _summarizeImport returns the counts for both
+      // sides so showImportConfirm can render a side-by-side delta.
+      const summary = _summarizeImport(s, arch);
+      const ok = (typeof showImportConfirm === 'function')
+        ? await showImportConfirm(summary)
+        : confirm(`Import ${summary.incoming.tasks} tasks (current: ${summary.current.tasks})?`);
+      if(!ok) return;
       // Force re-apply regardless of date
       s.date = todayKey();
       if(_applyState(s)){
@@ -846,12 +931,37 @@ function importData(file){
         renderAll(); renderLog(); renderGoalList();
         renderIntList(); renderQuickTimers();
         applyTheme(); setTaskView(taskView); setSmartView(smartView);
-        alert('Data restored successfully — '+s.tasks.length+' tasks loaded.');
+        if(typeof showExportToast === 'function'){
+          showExportToast('Restored '+s.tasks.length+' tasks from backup.');
+        } else {
+          alert('Data restored successfully — '+s.tasks.length+' tasks loaded.');
+        }
       } else { alert('Backup file could not be applied.'); }
     }catch(err){ alert('Import failed: '+err.message); }
   };
   reader.readAsText(file);
 }
+// Build a {current, incoming} summary for the import confirm dialog. Counts
+// only — the dialog shows a "tasks: 142 → 87" style preview without leaking
+// any actual task content into the prompt.
+function _summarizeImport(s, archiveBlob){
+  const cur = {
+    tasks:  Array.isArray(tasks) ? tasks.length : 0,
+    lists:  (typeof lists !== 'undefined' && Array.isArray(lists)) ? lists.length : 0,
+    archived: (Array.isArray(tasks) ? tasks.filter(t => t && t.archived).length : 0),
+  };
+  const inc = {
+    tasks:  Array.isArray(s.tasks) ? s.tasks.length : 0,
+    lists:  Array.isArray(s.lists) ? s.lists.length : 0,
+    archived: Array.isArray(s.tasks) ? s.tasks.filter(t => t && t.archived).length : 0,
+  };
+  let archDays = null;
+  if(archiveBlob){
+    try{ archDays = JSON.parse(archiveBlob).length || null; }catch(_){}
+  }
+  return { current: cur, incoming: inc, archiveDays: archDays };
+}
+if(typeof window !== 'undefined') window._summarizeImport = _summarizeImport;
 
 // ════════════════════════════════════════════════════════════════════════════
 // UNIFIED TASK EXPORT / IMPORT — single schema shared between CSV and JSON

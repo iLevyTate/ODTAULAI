@@ -195,11 +195,86 @@ function schedulePhaseAudio(){
 }
 
 // ========== NOTIFICATIONS (fire when tab hidden/minimized) ==========
-function reqNotifPerm(){
-  if('Notification' in window&&Notification.permission==='default'){
-    try{Notification.requestPermission()}catch(e){}
+// iOS Safari pre-16.4 has no Notification API; iOS 16.4+ supports it but ONLY
+// when the page is installed to the Home Screen (standalone PWA). Detect both
+// cases so the settings UI can explain *why* the toggle does nothing instead
+// of looking broken.
+function notifSupportLevel(){
+  if(!('Notification' in window)) return 'unsupported';
+  // iOS-family detection (iPhone/iPad and iPadOS-as-MacIntel-with-touch).
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if(isIOS && !isStandalone) return 'ios-needs-install';
+  return 'ok';
+}
+function notifPermissionState(){
+  if(!('Notification' in window)) return 'unsupported';
+  return Notification.permission; // 'default' | 'granted' | 'denied'
+}
+async function reqNotifPerm(){
+  // Returns the post-prompt permission so callers can update UI without a
+  // round-trip through localStorage. Wrapped because some browsers throw
+  // synchronously when called outside a user gesture.
+  if(!('Notification' in window)) return 'unsupported';
+  if(Notification.permission !== 'default') return Notification.permission;
+  try{
+    const result = await Notification.requestPermission();
+    return result || Notification.permission;
+  }catch(e){
+    return Notification.permission;
   }
 }
+// Render a one-line status under the Notifications toggle so users can see
+// *why* the toggle does (or doesn't) work. Without this, a flipped-on toggle
+// in a denied/unsupported state looks like the app is broken. Called from
+// toggleOpt and from settings panel open.
+function renderNotifStatus(){
+  const row = document.getElementById('notifStatusRow');
+  const host = document.getElementById('notifStatus');
+  if(!row || !host) return;
+  host.replaceChildren();
+  // Toggle off → don't surface anything; the user has disabled it explicitly.
+  if(typeof cfg !== 'undefined' && !cfg.notif){ row.hidden = true; return; }
+  const support = notifSupportLevel();
+  const perm = notifPermissionState();
+  let msg = '', cls = 'notif-status notif-status--ok', cta = null;
+  if(support === 'unsupported'){
+    msg = 'Browser does not support notifications.'; cls = 'notif-status notif-status--err';
+  } else if(support === 'ios-needs-install'){
+    msg = 'iOS: install to Home Screen first (Share → Add to Home Screen) — Safari blocks notifications on un-installed pages.';
+    cls = 'notif-status notif-status--warn';
+  } else if(perm === 'denied'){
+    msg = 'Permission denied. Re-enable in your browser site settings (lock icon → Notifications).';
+    cls = 'notif-status notif-status--err';
+  } else if(perm === 'default'){
+    msg = 'Permission not yet granted.';
+    cls = 'notif-status notif-status--warn';
+    cta = { label: 'Allow notifications', run: async () => {
+      const next = await reqNotifPerm();
+      renderNotifStatus();
+      if(next === 'granted' && typeof showExportToast === 'function'){
+        showExportToast('Notifications enabled.');
+      }
+    }};
+  } else {
+    msg = 'Notifications enabled.';
+  }
+  row.hidden = false;
+  host.className = cls;
+  const t = document.createElement('span');
+  t.textContent = msg;
+  host.appendChild(t);
+  if(cta){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'notif-status-btn';
+    b.textContent = cta.label;
+    b.onclick = cta.run;
+    host.appendChild(b);
+  }
+}
+if(typeof window !== 'undefined') window.renderNotifStatus = renderNotifStatus;
 
 function notify(title, body, opts){
   if(!cfg.notif)return;

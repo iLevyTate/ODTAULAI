@@ -1567,6 +1567,69 @@ function showAppConfirm(message){
     setTimeout(()=>{const b=gid('appConfirmOk');if(b)b.focus()},30);
   });
 }
+
+// Reusable side-by-side delta dialog for destructive imports. Builds a
+// rich body (heading + delta rows + warning) into the existing app-confirm
+// modal so we don't need a second modal element. Numbers only — task
+// content never enters the prompt.
+function showImportConfirm(summary){
+  return new Promise(resolve => {
+    const ov = gid('appConfirmModal'), m = gid('appConfirmMessage');
+    if(!ov || !m){
+      resolve(confirm(`Replace current ${summary.current.tasks} tasks with ${summary.incoming.tasks} from backup?`));
+      return;
+    }
+    m.replaceChildren();
+    const h = document.createElement('div');
+    h.style.fontWeight = '700';
+    h.style.marginBottom = '8px';
+    h.textContent = 'Restore from backup?';
+    m.appendChild(h);
+    const tbl = document.createElement('div');
+    tbl.style.display = 'grid';
+    tbl.style.gridTemplateColumns = 'auto auto auto';
+    tbl.style.columnGap = '14px';
+    tbl.style.rowGap = '4px';
+    tbl.style.fontSize = '13px';
+    tbl.style.margin = '4px 0 10px';
+    const rows = [
+      ['', 'Current', 'After import'],
+      ['Tasks',    summary.current.tasks,    summary.incoming.tasks],
+      ['Lists',    summary.current.lists,    summary.incoming.lists],
+      ['Archived', summary.current.archived, summary.incoming.archived],
+    ];
+    rows.forEach((row, i) => {
+      row.forEach((cell, j) => {
+        const c = document.createElement('div');
+        c.textContent = String(cell);
+        if(i === 0){ c.style.fontWeight = '600'; c.style.color = 'var(--text-3)'; c.style.fontSize = '11px'; c.style.textTransform = 'uppercase'; c.style.letterSpacing = '.4px'; }
+        else if(j > 0){ c.style.fontVariantNumeric = 'tabular-nums'; }
+        tbl.appendChild(c);
+      });
+    });
+    m.appendChild(tbl);
+    if(summary.archiveDays != null){
+      const a = document.createElement('div');
+      a.style.fontSize = '12px';
+      a.style.color = 'var(--text-3)';
+      a.style.marginBottom = '8px';
+      a.textContent = `Plus ${summary.archiveDays} archived day${summary.archiveDays === 1 ? '' : 's'}.`;
+      m.appendChild(a);
+    }
+    const w = document.createElement('div');
+    w.style.fontSize = '12px';
+    w.style.color = 'var(--warning)';
+    w.style.padding = '8px 10px';
+    w.style.background = 'color-mix(in srgb, var(--warning) 10%, transparent)';
+    w.style.borderRadius = '6px';
+    w.textContent = '⚠ This replaces all current tasks, lists, and settings. Cannot be undone.';
+    m.appendChild(w);
+    _appConfirmResolve = resolve;
+    ov.classList.add('open');
+    setTimeout(() => { const b = gid('appConfirmOk'); if(b) b.focus(); }, 30);
+  });
+}
+if(typeof window !== 'undefined') window.showImportConfirm = showImportConfirm;
 let _appPromptResolve=null,_appPromptMultiline=false;
 function _appPromptTextareaKeydown(e){
   if(!_appPromptMultiline) return;
@@ -1759,7 +1822,33 @@ function miniTimerToggle(){
 }
 
 // ========== STATS ==========
-function renderStats(){gid('statPomos').textContent=totalPomos;const fm=Math.floor(totalFocusSec/60);gid('statFocus').textContent=fm>=60?Math.floor(fm/60)+'h '+fm%60+'m':fm+'m';gid('statBreaks').textContent=totalBreaks;const h=gid('historyBlocks');h.textContent='';sessionHistory.forEach(s=>{const b=document.createElement('div');b.className='hblock h'+s.type[0];h.appendChild(b)});if(typeof renderStatsByArea==='function') renderStatsByArea();if(typeof renderFocusStreak==='function') renderFocusStreak();}
+function renderStats(){
+  gid('statPomos').textContent=totalPomos;
+  const fm=Math.floor(totalFocusSec/60);
+  gid('statFocus').textContent=fm>=60?Math.floor(fm/60)+'h '+fm%60+'m':fm+'m';
+  gid('statBreaks').textContent=totalBreaks;
+  const h=gid('historyBlocks');
+  h.textContent='';
+  sessionHistory.forEach(s=>{const b=document.createElement('div');b.className='hblock h'+s.type[0];h.appendChild(b)});
+  // Empty state — when nothing has happened today, the three big "0"s look
+  // like a rendering bug. Append a one-line hint so new users know what to
+  // do next. Removed automatically once any session lands.
+  let hint = gid('statsEmptyHint');
+  if(totalPomos === 0 && (!sessionHistory || !sessionHistory.length)){
+    if(!hint){
+      hint = document.createElement('div');
+      hint.id = 'statsEmptyHint';
+      hint.className = 'stats-empty-hint';
+      hint.textContent = 'No sessions yet today — press Start on the timer above to begin a focus block.';
+      const host = h.parentNode;
+      if(host) host.insertBefore(hint, h.nextSibling);
+    }
+  } else if(hint){
+    hint.remove();
+  }
+  if(typeof renderStatsByArea==='function') renderStatsByArea();
+  if(typeof renderFocusStreak==='function') renderFocusStreak();
+}
 
 // ========== G-17 STATS BY LIFE AREA ==========
 // Pivot today's timeLog by the active task's category — purely from existing

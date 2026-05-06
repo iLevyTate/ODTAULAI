@@ -1915,6 +1915,39 @@ function renderTaskList(){
       const mod = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'') ? '⌘' : 'Ctrl';
       empty.appendChild(buildIcon('sparkles'));
       addBlock('task-empty-title', 'No tasks yet');
+      // First-run welcome card (only on truly first launch — once we've ever
+      // seen tasks, this short tour is just noise). The flag is persistent
+      // across sessions so re-emptying the list later doesn't re-show it.
+      try{
+        const seen = localStorage.getItem('stupind_welcomed') === '1';
+        if(!seen){
+          const w = document.createElement('div');
+          w.className = 'task-empty-welcome';
+          const h = document.createElement('div');
+          h.className = 'task-empty-welcome-title';
+          h.textContent = 'Welcome to OdTauLai';
+          w.appendChild(h);
+          const ul = document.createElement('ul');
+          ul.className = 'task-empty-welcome-list';
+          [
+            ['Type a task above. Words like "tomorrow", "@urgent", "#tag", "!star" parse automatically.'],
+            [`Press ${mod}+K for the command palette and Ask — works fully offline once the on-device model is loaded.`],
+            ['Click chips inside a task (priority, effort, category…) — they save instantly, no Save button needed.'],
+            ['Open Settings → AI to download the on-device language model. Everything stays on your device.'],
+          ].forEach(([t]) => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+          w.appendChild(ul);
+          const dismiss = document.createElement('button');
+          dismiss.type = 'button';
+          dismiss.className = 'task-empty-welcome-dismiss';
+          dismiss.textContent = 'Got it';
+          dismiss.onclick = () => {
+            try{ localStorage.setItem('stupind_welcomed', '1'); }catch(_){}
+            w.remove();
+          };
+          w.appendChild(dismiss);
+          empty.appendChild(w);
+        }
+      }catch(_){ /* localStorage disabled — skip the welcome card silently */ }
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'first-task-btn';
@@ -2140,6 +2173,14 @@ function _initTaskListSortable(){
     forceFallback: false,
     fallbackOnBody: true,
     swapThreshold: 0.65,
+    // Auto-scroll while dragging near the top/bottom edges. Sortable's
+    // built-in scroll handler is window-scoped (good — task list lives in
+    // the document body for our layout). Without this, dragging across a
+    // long list required releasing, scrolling, re-grabbing.
+    scroll: true,
+    scrollSensitivity: 80,
+    scrollSpeed: 14,
+    bubbleScroll: true,
     onEnd: function(evt){
       // Read new DOM order, persist as t.order. Force manual sort so the
       // user-driven order survives across renders that would otherwise
